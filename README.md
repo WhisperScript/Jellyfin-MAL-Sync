@@ -27,10 +27,20 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 
 ## 🚀 Installation
 
-### Download (recommended)
+### Via Jellyfin Plugin Repository (recommended)
 
-1. Go to the [Releases](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/releases/latest) page and download `Jellyfin.Plugin.MalSync.dll`
-2. Copy it into your Jellyfin plugin folder:
+1. In Jellyfin, go to **Dashboard → Plugins → Repositories**
+2. Click **+ New Repository** and add:
+   ```
+   https://raw.githubusercontent.com/Andrey-Saykin/Jellyfin-MAL-Sync/main/manifest.json
+   ```
+3. Go to **Catalog**, find **MAL Sync**, and click **Install**
+4. Restart Jellyfin
+
+### Manual download
+
+1. Go to the [Releases](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/releases/latest) page and download `Jellyfin.Plugin.MalSync_10.11.0.zip`
+2. Extract the DLL and copy it into your Jellyfin plugin folder:
 
 ```bash
 # Standard Linux install

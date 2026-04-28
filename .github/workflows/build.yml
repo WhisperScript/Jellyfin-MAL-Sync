@@ -7,38 +7,88 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Fetch full history so we can push back the manifest commit
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
-      - name: Restore dependencies
-        run: dotnet restore Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj
+      - name: Restore & build
+        run: |
+          dotnet publish Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj \
+            -c Release \
+            --output dist \
+            --no-self-contained \
+            -p:DebugType=none \
+            -p:DebugSymbols=false
 
-      - name: Build
-        run: dotnet publish Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj \
-          -c Release \
-          --output dist \
-          --no-self-contained \
-          -p:DebugType=none \
-          -p:DebugSymbols=false
+      - name: Package plugin zip
+        run: |
+          mkdir -p release
+          cp dist/Jellyfin.Plugin.MalSync.dll release/
+          cd release && zip Jellyfin.Plugin.MalSync_10.11.0.zip Jellyfin.Plugin.MalSync.dll
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellyfin.Plugin.MalSync
-          path: dist/Jellyfin.Plugin.MalSync.dll
+          path: release/Jellyfin.Plugin.MalSync_10.11.0.zip
+
+      # ── Release-only steps (triggered by v* tag) ────────────────────────
+      - name: Update manifest.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${TAG#v}"
+          CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_10.11.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
+          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_10.11.0.zip"
+          python3 - "$VERSION" "$CHECKSUM" "$SOURCE_URL" "$TIMESTAMP" <<'PYEOF'
+          import json, sys
+          version, checksum, source_url, timestamp = sys.argv[1:]
+          with open('manifest.json') as f:
+              m = json.load(f)
+          m[0]['versions'].insert(0, {
+              'changelog': '',
+              'targetAbi': '10.11.0.0',
+              'version': version,
+              'sourceUrl': source_url,
+              'checksum': checksum,
+              'timestamp': timestamp,
+          })
+          with open('manifest.json', 'w') as f:
+              json.dump(m, f, indent=2)
+              f.write('\n')
+          PYEOF
+
+      - name: Commit updated manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git diff --cached --quiet || git commit -m "chore: update manifest for ${{ github.ref_name }}"
+          git push origin HEAD:main
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Jellyfin.Plugin.MalSync.dll
+          files: release/Jellyfin.Plugin.MalSync_10.11.0.zip
           generate_release_notes: true
+
