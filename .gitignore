@@ -1,0 +1,19 @@
+# Build outputs
+bin/
+obj/
+dist/
+
+# dotnet install script (local tooling, not part of the plugin)
+dotnet-install.sh
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Rider
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

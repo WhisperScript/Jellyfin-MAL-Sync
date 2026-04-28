@@ -1,0 +1,790 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using Jellyfin.Data.Enums;
+using Jellyfin.Database.Implementations.Entities;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.MalSync.Services;
+
+/// <summary>
+/// Core synchronisation logic – C# port of jf_mal_sync.py.
+/// Reads Jellyfin watch progress and pushes episode counts / statuses to MAL.
+/// </summary>
+public sealed class MalSyncService
+{
+    // ── Unicode normalisation map (matches Python script) ─────────────────
+    private static readonly (string From, string To)[] UnicodeMap =
+    {
+        ("×","x"),("÷","/"),("：",":"),("・"," "),("！","!"),("？","?"),
+        ("（","("),("）",")"),("【","["),("】","]"),("　"," "),
+    };
+
+    private static readonly Regex SequelRe = new(
+        @"\b(2nd|3rd|4th|5th|6th|7th|8th|\d+th|season\s*[2-9]|part\s*[2-9]|\bii\b|\biii\b|\biv\b)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly MalAuthService _auth;
+    private readonly ILibraryManager _libraryManager;
+    private readonly IUserDataManager _userDataManager;
+    private readonly IUserManager _userManager;
+    private readonly ILogger<MalSyncService> _logger;
+
+    // Runtime MAL-ID caches (populated once per sync run)
+    private readonly Dictionary<string, CacheEntry> _malIdCache = new();
+    private readonly Dictionary<string, SyncState> _syncState = new();
+
+    public MalSyncService(
+        IHttpClientFactory httpFactory,
+        MalAuthService auth,
+        ILibraryManager libraryManager,
+        IUserDataManager userDataManager,
+        IUserManager userManager,
+        ILogger<MalSyncService> logger)
+    {
+        _httpFactory = httpFactory;
+        _auth = auth;
+        _libraryManager = libraryManager;
+        _userDataManager = userDataManager;
+        _userManager = userManager;
+        _logger = logger;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // PUBLIC ENTRY POINT
+    // ═════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Runs a full sync for one Jellyfin user.
+    /// </summary>
+    /// <param name="jellyfinUserId">Jellyfin user-id to sync.</param>
+    /// <param name="dryRun">When true, log what would happen without writing to MAL.</param>
+    /// <param name="cancellationToken">Cancellation support.</param>
+    /// <returns>Human-readable log lines collected during the run.</returns>
+    public async Task<List<string>> SyncUserAsync(
+        string jellyfinUserId,
+        bool dryRun,
+        bool debug = false,
+        Action<string>? onLog = null,
+        CancellationToken cancellationToken = default)
+    {
+        var log = new List<string>();
+        void Log(string msg) { log.Add(msg); _logger.LogInformation("{Msg}", msg); onLog?.Invoke(msg); }
+        void Dbg(string msg) { _logger.LogDebug("{Msg}", msg); if (debug) { var line = "[DEBUG] " + msg; log.Add(line); onLog?.Invoke(line); } }
+
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+
+        // ── Get MAL access token ───────────────────────────────────────
+        var token = await _auth.GetAccessTokenAsync(jellyfinUserId).ConfigureAwait(false);
+        if (token is null)
+        {
+            Log($"[ERROR] No valid MAL token for user {jellyfinUserId}. Please authenticate first.");
+            return log;
+        }
+
+        var malHeaders = new Dictionary<string, string> { ["Authorization"] = $"Bearer {token}" };
+
+        // ── Get Jellyfin user object ───────────────────────────────────
+        var jfUser = _userManager.GetUserById(Guid.Parse(jellyfinUserId));
+        if (jfUser is null)
+        {
+            Log($"[ERROR] Jellyfin user {jellyfinUserId} not found.");
+            return log;
+        }
+
+        // ── Fetch Jellyfin items ───────────────────────────────────────
+        Log("Fetching Jellyfin metadata…");
+        var jfItems = GetJfItems(jfUser);
+        if (jfItems.Count == 0)
+        {
+            Log("[ERROR] No items returned from Jellyfin.");
+            return log;
+        }
+        Dbg($"Jellyfin returned {jfItems.Count} movies/series.");
+
+        // ── Fetch MAL user list (paginated) ────────────────────────────
+        Log("Fetching MAL user list…");
+        var (malUserList, malTitleEntries) = await FetchMalUserListAsync(malHeaders, cancellationToken).ConfigureAwait(false);
+        Dbg($"MAL user list loaded: {malUserList.Count} entries.");
+
+        // ── Filter anime series ────────────────────────────────────────
+        var animePaths = cfg.GetAnimePaths();
+        var animeSeries = jfItems
+            .Where(i => i.Type == "Series"
+                     && animePaths.Any(p => (i.Path ?? "").StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        Dbg($"Processing {animeSeries.Count} series from anime folders.");
+
+        // Season 1 MAL-ID cache keyed by Jellyfin series-id
+        var s1IdCache = new Dictionary<string, string>();
+
+        Log(dryRun ? "[DRY RUN – no changes will be written to MAL]" : "Starting sync…");
+
+        foreach (var series in animeSeries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var seriesName = series.Name ?? "Unknown";
+            var seriesId = series.Id;
+
+            // Load seasons
+            var seasons = GetSeasons(Guid.Parse(seriesId), jfUser);
+            var realSeasons = seasons.Where(s => (s.IndexNumber ?? 0) >= 1).ToList();
+            if (realSeasons.Count == 0) { Dbg($"No real seasons for '{seriesName}', skipping."); continue; }
+
+            foreach (var season in realSeasons)
+            {
+                var seasonNum = season.IndexNumber ?? 1;
+                var seasonId = season.Id;
+
+                // ── Resolve MAL ID ─────────────────────────────────────
+                string? malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList");
+
+                if (malId is null) malId = GetCachedMalId(seriesName, seasonNum, cfg.CacheTtlDays);
+                if (malId is not null && seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
+
+                if (malId is null)
+                {
+                    malId = FindIdInUserList(malTitleEntries, seriesName, seasonNum, cfg.MalSearchMinSimilarity);
+                    if (malId is not null)
+                    {
+                        if (seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
+                        SetCachedMalId(seriesName, seasonNum, malId);
+                    }
+                }
+
+                if (malId is null)
+                {
+                    if (seasonNum == 1)
+                    {
+                        malId = series.ProviderIds?.GetValueOrDefault("MyAnimeList");
+                        if (malId is null)
+                        {
+                            Dbg($"No MAL ID for '{seriesName}' S1, searching by title…");
+                            malId = await SearchMalIdAsync(seriesName, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                        }
+                        if (malId is not null)
+                        {
+                            s1IdCache.TryAdd(seriesId, malId);
+                            SetCachedMalId(seriesName, seasonNum, malId);
+                        }
+                    }
+                    else
+                    {
+                        s1IdCache.TryGetValue(seriesId, out var s1Id);
+                        if (s1Id is null)
+                        {
+                            var baseTitle = StripSeasonSuffix(seriesName);
+                            Dbg($"No S1 cache for '{seriesName}', searching S1 by title '{baseTitle}'…");
+                            s1Id = await SearchMalIdAsync(baseTitle, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                        }
+                        if (s1Id is not null)
+                        {
+                            Dbg($"Traversing sequel chain for '{seriesName}' S{seasonNum} from S1 ID {s1Id}…");
+                            malId = await GetMalSequelFromChainAsync(s1Id, seasonNum, seriesName, malHeaders, cancellationToken).ConfigureAwait(false);
+                        }
+                        if (malId is null)
+                        {
+                            var suffix = seasonNum switch { 2 => "2nd Season", 3 => "3rd Season", 4 => "4th Season", 5 => "5th Season", _ => $"{seasonNum}th Season" };
+                            Dbg($"Sequel chain failed, direct search for '{seriesName} {suffix}'…");
+                            malId = await SearchMalIdAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                        }
+                        if (malId is not null) SetCachedMalId(seriesName, seasonNum, malId);
+                    }
+                }
+
+                if (malId is not null && seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
+
+                if (malId is null)
+                {
+                    Dbg($"Skipping '{seriesName}' S{seasonNum}: MAL ID not found.");
+                    continue;
+                }
+
+                // ── Get MAL entry info ─────────────────────────────────
+                malUserList.TryGetValue(malId, out var malEntry);
+                int malTotal = malEntry?.Total ?? 0;
+                var airingStatus = malEntry?.AiringStatus ?? string.Empty;
+
+                if (malEntry is null)
+                {
+                    var info = await GetMalAnimeInfoAsync(malId, malHeaders, cancellationToken).ConfigureAwait(false);
+                    malTotal = info.NumEpisodes;
+                    airingStatus = info.Status ?? string.Empty;
+                }
+                Dbg($"'{seriesName}' S{seasonNum} → MAL ID {malId}, eps: {(malTotal > 0 ? malTotal : "?")}, airing: {airingStatus}");
+
+                // ── Load Jellyfin episodes ─────────────────────────────
+                var episodes = GetEpisodes(Guid.Parse(seasonId), jfUser);
+                if (episodes.Count == 0) continue;
+
+                // Season offset for absolute-numbered shows
+                var minIdx = episodes.Min(e => e.IndexNumber ?? 1);
+                var seasonOffset = minIdx > 12 ? minIdx - 1 : 0;
+
+                var label = (seasonNum > 1 || realSeasons.Count > 1) ? $"{seriesName} S{seasonNum}" : seriesName;
+
+                // ── MAL → Jellyfin: mark episodes played ───────────────
+                if (cfg.JfUpdateWatched && malEntry?.Watched > 0)
+                {
+                    MarkJfWatched(jfUser, episodes, malEntry.Watched, seasonOffset, label, dryRun);
+                }
+
+                // ── Calculate watched count ────────────────────────────
+                var watchedEps = episodes.Where(e => e.UserData?.Played == true).ToList();
+                if (watchedEps.Count == 0) { Dbg($"  → '{label}': no episodes watched yet."); continue; }
+
+                var rawMax = watchedEps.Max(e => e.IndexNumber ?? 0);
+                var watchedCount = rawMax - seasonOffset;
+                if (malTotal > 0) watchedCount = Math.Min(watchedCount, malTotal);
+
+                var status = airingStatus == "finished_airing" && malTotal > 0 && watchedCount >= malTotal
+                             ? "completed" : "watching";
+
+                // ── Change detection ───────────────────────────────────
+                if (malEntry is not null)
+                {
+                    if (cfg.MalNoDowngrade)
+                    {
+                        var rank = new Dictionary<string, int>
+                        { ["completed"] = 3, ["watching"] = 2, ["on_hold"] = 1, ["plan_to_watch"] = 0, ["dropped"] = 0 };
+                        if (watchedCount < malEntry.Watched
+                            || rank.GetValueOrDefault(status) < rank.GetValueOrDefault(malEntry.Status ?? ""))
+                        {
+                            Dbg($"  → '{label}': skipping – would downgrade MAL (local {watchedCount} {status} | MAL {malEntry.Watched} {malEntry.Status}).");
+                            continue;
+                        }
+                    }
+                    if (malEntry.Watched == watchedCount && malEntry.Status == status)
+                    {
+                        Dbg($"  → '{label}': already up to date ({watchedCount} eps, {status}).");
+                        continue;
+                    }
+                }
+                else
+                {
+                    if (_syncState.TryGetValue(malId, out var last)
+                        && last.WatchedCount == watchedCount && last.Status == status)
+                    {
+                        Dbg($"  → '{label}': no change since last run, skipping.");
+                        continue;
+                    }
+                }
+
+                // ── Write to MAL (or dry-run) ──────────────────────────
+                if (dryRun)
+                {
+                    if (malEntry is not null)
+                        Log($"[DRY RUN] {label}: would set ep {watchedCount}/{(malTotal > 0 ? malTotal : "?")} ({status})" +
+                            $" – MAL currently has {malEntry.Watched}/{(malTotal > 0 ? malTotal : "?")} ({malEntry.Status}) [ID {malId}]");
+                    else
+                        Log($"[DRY RUN] {label}: would set ep {watchedCount}/{(malTotal > 0 ? malTotal : "?")} ({status})" +
+                            $" – not in MAL list yet [ID {malId}]");
+                }
+                else
+                {
+                    using var http = _httpFactory.CreateClient("MalSync");
+                    foreach (var (k, v) in malHeaders) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+
+                    var resp = await http.PutAsync(
+                        $"https://api.myanimelist.net/v2/anime/{malId}/my_list_status",
+                        new FormUrlEncodedContent(new Dictionary<string, string>
+                        {
+                            ["num_watched_episodes"] = watchedCount.ToString(),
+                            ["status"] = status,
+                        }),
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        Log($"[MAL] {label}: {watchedCount}/{(malTotal > 0 ? malTotal : "?")} eps ({status})");
+                        _syncState[malId] = new SyncState(watchedCount, status);
+                    }
+                    else
+                    {
+                        var body = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                        Log($"[MAL ERROR] Could not sync '{label}': {body}");
+                    }
+                }
+            }
+        }
+
+        Log(dryRun ? "Dry-run complete." : "Sync complete.");
+        return log;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // JELLYFIN HELPERS
+    // ═════════════════════════════════════════════════════════════════════
+
+    private List<JfItem> GetJfItems(User user)
+    {
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = [BaseItemKind.Series, BaseItemKind.Movie],
+            Recursive = true,
+        });
+        return items.Select(i => ToJfItem(i, user)).ToList();
+    }
+
+    private List<JfItem> GetSeasons(Guid seriesId, User user)
+    {
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = [BaseItemKind.Season],
+            ParentId = seriesId,
+        });
+        return items.Select(i => ToJfItem(i, user)).ToList();
+    }
+
+    private List<JfItem> GetEpisodes(Guid seasonId, User user)
+    {
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = [BaseItemKind.Episode],
+            ParentId = seasonId,
+            IsMissing = false,
+        });
+        return items.Select(i => ToJfItem(i, user)).ToList();
+    }
+
+    private JfItem ToJfItem(BaseItem item, User user)
+    {
+        var userData = _userDataManager.GetUserData(user, item);
+        return new JfItem
+        {
+            Id = item.Id.ToString("N"),
+            Name = item.Name,
+            Type = item.GetType().Name,
+            Path = item.Path,
+            IndexNumber = item.IndexNumber,
+            ProviderIds = item.ProviderIds?.ToDictionary(k => k.Key, v => v.Value),
+            UserData = new JfUserData { Played = userData.Played },
+        };
+    }
+
+    private void MarkJfWatched(
+        User user, List<JfItem> episodes,
+        int malWatched, int seasonOffset, string label, bool dryRun)
+    {
+        foreach (var ep in episodes)
+        {
+            var epIdx = (ep.IndexNumber ?? 0) - seasonOffset;
+            if (epIdx <= 0) continue;
+            if (epIdx <= malWatched && ep.UserData?.Played != true)
+            {
+                if (dryRun)
+                {
+                    _logger.LogInformation("[DRY RUN] {Label}: would mark ep {Idx} as watched in Jellyfin", label, epIdx);
+                }
+                else
+                {
+                    var item = _libraryManager.GetItemById(ep.Id);
+                    if (item is not null)
+                    {
+                        var data = _userDataManager.GetUserData(user, item);
+                        data.Played = true;
+                        data.PlayCount = Math.Max(1, data.PlayCount);
+                        data.LastPlayedDate = DateTime.UtcNow;
+                        _userDataManager.SaveUserData(user, item, data,
+                            UserDataSaveReason.TogglePlayed, CancellationToken.None);
+                    }
+                }
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // MAL API HELPERS
+    // ═════════════════════════════════════════════════════════════════════
+
+    private async Task<(Dictionary<string, MalUserEntry> List, List<(string Norm, string Id, string Title)> Titles)>
+        FetchMalUserListAsync(Dictionary<string, string> headers, CancellationToken ct)
+    {
+        var list = new Dictionary<string, MalUserEntry>();
+        var titles = new List<(string, string, string)>();
+        var url = "https://api.myanimelist.net/v2/users/@me/animelist";
+        var @params = "fields=list_status,num_episodes,alternative_titles,status&limit=1000&nsfw=true";
+
+        while (!string.IsNullOrEmpty(url))
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+
+            var resp = await http.GetAsync($"{url}{(url.Contains('?') ? "&" : "?")}{@params}", ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) break;
+
+            var doc = await resp.Content.ReadFromJsonAsync<MalListPage>(cancellationToken: ct).ConfigureAwait(false);
+            if (doc is null) break;
+
+            foreach (var entry in doc.Data ?? Enumerable.Empty<MalListEntry>())
+            {
+                var node = entry.Node;
+                var mid = node.Id.ToString();
+                var lst = entry.ListStatus ?? new();
+                var alt = node.AlternativeTitles ?? new();
+
+                var ue = new MalUserEntry
+                {
+                    Title = node.Title ?? "",
+                    Total = node.NumEpisodes,
+                    AiringStatus = node.Status ?? "",
+                    Watched = lst.NumEpisodesWatched,
+                    Status = lst.Status ?? "",
+                };
+                list[mid] = ue;
+
+                var tList = new List<string> { ue.Title };
+                if (!string.IsNullOrEmpty(alt.En)) tList.Add(alt.En);
+                if (alt.Synonyms is not null) tList.AddRange(alt.Synonyms);
+                foreach (var t in tList.Where(t => !string.IsNullOrEmpty(t)))
+                    titles.Add((NormalizeTitle(t), mid, ue.Title));
+            }
+
+            url = doc.Paging?.Next ?? string.Empty;
+            @params = string.Empty; // next URL already has all query params
+        }
+
+        return (list, titles);
+    }
+
+    private async Task<MalAnimeInfo> GetMalAnimeInfoAsync(
+        string malId, Dictionary<string, string> headers, CancellationToken ct)
+    {
+        try
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+            var resp = await http.GetAsync(
+                $"https://api.myanimelist.net/v2/anime/{malId}?fields=num_episodes,status", ct).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+                return await resp.Content.ReadFromJsonAsync<MalAnimeInfo>(cancellationToken: ct).ConfigureAwait(false)
+                       ?? new();
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "MAL anime info fetch failed for ID {Id}", malId); }
+        return new();
+    }
+
+    private async Task<string?> GetMalSequelFromChainAsync(
+        string baseId, int targetSeason, string seriesName,
+        Dictionary<string, string> headers, CancellationToken ct,
+        int maxHops = 12)
+    {
+        var chain = new List<(string Id, string Title)>();
+        var current = baseId;
+        var visited = new HashSet<string> { baseId };
+
+        for (var hop = 0; hop < maxHops; hop++)
+        {
+            try
+            {
+                using var http = _httpFactory.CreateClient("MalSync");
+                foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+                var resp = await http.GetAsync(
+                    $"https://api.myanimelist.net/v2/anime/{current}?fields=related_anime,title", ct).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode) break;
+
+                var doc = await resp.Content.ReadFromJsonAsync<MalRelatedResponse>(cancellationToken: ct).ConfigureAwait(false);
+                var sequels = doc?.RelatedAnime?
+                    .Where(r => r.RelationType is "sequel" or "alternative_version"
+                             && !visited.Contains(r.Node.Id.ToString()))
+                    .ToList() ?? new();
+
+                if (sequels.Count == 0) break;
+
+                var node = sequels[0].Node;
+                var nid = node.Id.ToString();
+                visited.Add(nid);
+                chain.Add((nid, node.Title ?? ""));
+                current = nid;
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Sequel chain error at ID {Id}", current); break; }
+        }
+
+        if (chain.Count == 0) return null;
+
+        var baseTitle = StripSeasonSuffix(seriesName);
+
+        // 1. Season-number match
+        foreach (var (cid, ctitle) in chain)
+            if (ContainsSeasonNumber(ctitle, targetSeason)
+                && TitleSimilarity(baseTitle, StripSeasonSuffix(ctitle)) >= 0.4)
+                return cid;
+
+        // 2. Index fallback
+        var pos = targetSeason - 2;
+        if (pos >= 0 && pos < chain.Count) return chain[pos].Id;
+
+        // 3. Last entry
+        return chain[^1].Id;
+    }
+
+    private async Task<string?> SearchMalIdAsync(
+        string title, Dictionary<string, string> headers, int seasonNum,
+        double minSimilarity, CancellationToken ct)
+    {
+        try
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+            var resp = await http.GetAsync(
+                $"https://api.myanimelist.net/v2/anime?q={Uri.EscapeDataString(title)}&limit=5&fields=id,title,alternative_titles",
+                ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var doc = await resp.Content.ReadFromJsonAsync<MalSearchPage>(cancellationToken: ct).ConfigureAwait(false);
+            string? bestId = null;
+            double bestScore = 0;
+
+            foreach (var entry in doc?.Data ?? Enumerable.Empty<MalSearchEntry>())
+            {
+                var node = entry.Node;
+                var alt = node.AlternativeTitles ?? new();
+                var candidates = new List<string> { node.Title ?? "" };
+                if (!string.IsNullOrEmpty(alt.En)) candidates.Add(alt.En);
+                if (alt.Synonyms is not null) candidates.AddRange(alt.Synonyms);
+
+                var score = candidates.Max(c => TitleSimilarity(title, c));
+                var allTitles = string.Join(" ", candidates);
+
+                if (seasonNum == 1)
+                {
+                    if (IsSequelTitle(allTitles)) score *= 0.3;
+                }
+                else
+                {
+                    var baseQ = StripSeasonSuffix(title);
+                    var bases = candidates.Select(StripSeasonSuffix).ToList();
+                    var bScore = bases.Max(c => TitleSimilarity(baseQ, c));
+                    if (!ContainsSeasonNumber(allTitles, seasonNum)) bScore *= 0.4;
+
+                    if (bScore > 0 && baseQ.Split(' ').Length > 0)
+                    {
+                        var qFirst = baseQ.Split(' ')[0].ToLowerInvariant();
+                        var maxFirst = candidates
+                            .Select(c => StripSeasonSuffix(c).Split(' ').FirstOrDefault()?.ToLowerInvariant() ?? "")
+                            .Select(w => TitleSimilarity(qFirst, w))
+                            .DefaultIfEmpty(0).Max();
+                        if (maxFirst < 0.5) bScore *= 0.15;
+                    }
+                    score = Math.Min(score, bScore);
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestId = node.Id.ToString();
+                }
+            }
+
+            if (bestScore >= minSimilarity) return bestId;
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "MAL search failed for '{Title}'", title); }
+        return null;
+    }
+
+    private string? FindIdInUserList(
+        List<(string Norm, string Id, string Title)> entries,
+        string seriesName, int seasonNum, double minSimilarity)
+    {
+        if (entries.Count == 0) return null;
+
+        string? bestId = null;
+        double bestScore = 0;
+
+        if (seasonNum == 1)
+        {
+            var normQ = NormalizeTitle(seriesName);
+            foreach (var (norm, mid, _) in entries)
+            {
+                var score = Similarity(normQ, norm);
+                if (IsSequelTitle(norm)) score *= 0.3;
+                if (score > bestScore) { bestScore = score; bestId = mid; }
+            }
+        }
+        else
+        {
+            var baseQ = NormalizeTitle(StripSeasonSuffix(seriesName));
+            foreach (var (norm, mid, orig) in entries)
+            {
+                var baseT = NormalizeTitle(StripSeasonSuffix(orig));
+                var score = Similarity(baseQ, baseT);
+                if (!ContainsSeasonNumber(norm, seasonNum)) score *= 0.4;
+
+                var qParts = baseQ.Split(' ');
+                var tParts = baseT.Split(' ');
+                if (qParts.Length > 0 && tParts.Length > 0
+                    && Similarity(qParts[0], tParts[0]) < 0.5)
+                    score *= 0.15;
+
+                if (score > bestScore) { bestScore = score; bestId = mid; }
+            }
+        }
+
+        return bestScore >= minSimilarity ? bestId : null;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // MAL-ID CACHE (in-memory for session; can be persisted via plugin storage)
+    // ═════════════════════════════════════════════════════════════════════
+
+    private string? GetCachedMalId(string series, int season, int ttlDays)
+    {
+        var key = $"{series}::{season}";
+        if (!_malIdCache.TryGetValue(key, out var entry)) return null;
+        if ((DateTime.UtcNow - entry.CachedAt).TotalDays > ttlDays) { _malIdCache.Remove(key); return null; }
+        return entry.MalId;
+    }
+
+    private void SetCachedMalId(string series, int season, string malId)
+        => _malIdCache[$"{series}::{season}"] = new CacheEntry(malId, DateTime.UtcNow);
+
+    // ═════════════════════════════════════════════════════════════════════
+    // STRING / TITLE HELPERS  (mirrors the Python script)
+    // ═════════════════════════════════════════════════════════════════════
+
+    private static string NormalizeTitle(string t)
+    {
+        foreach (var (from, to) in UnicodeMap) t = t.Replace(from, to);
+        return Regex.Replace(t.ToLowerInvariant().Trim(), @"\s+", " ");
+    }
+
+    private static double TitleSimilarity(string a, string b)
+        => Similarity(NormalizeTitle(a), NormalizeTitle(b));
+
+    private static double Similarity(string a, string b)
+    {
+        if (a == b) return 1.0;
+        if (a.Length == 0 || b.Length == 0) return 0.0;
+        // Levenshtein-based ratio (equivalent to Python difflib SequenceMatcher)
+        int[,] dp = new int[a.Length + 1, b.Length + 1];
+        for (var i = 0; i <= a.Length; i++) dp[i, 0] = i;
+        for (var j = 0; j <= b.Length; j++) dp[0, j] = j;
+        for (var i = 1; i <= a.Length; i++)
+            for (var j = 1; j <= b.Length; j++)
+                dp[i, j] = a[i - 1] == b[j - 1]
+                    ? dp[i - 1, j - 1]
+                    : 1 + Math.Min(dp[i - 1, j - 1], Math.Min(dp[i - 1, j], dp[i, j - 1]));
+
+        var maxLen = Math.Max(a.Length, b.Length);
+        return 1.0 - (double)dp[a.Length, b.Length] / maxLen;
+    }
+
+    private static string StripSeasonSuffix(string title)
+    {
+        title = title.Trim();
+        string[] pats =
+        {
+            @"\s+\d+(?:st|nd|rd|th)\s+season\s*$",
+            @"\s+season\s+\d+\s*$",
+            @"\s+part\s+\d+\s*$",
+            @"\s+[IVX]{1,4}\s*$",
+            @"\s+\d+\s*$",
+        };
+        foreach (var p in pats)
+            title = Regex.Replace(title, p, "", RegexOptions.IgnoreCase).Trim();
+        return title;
+    }
+
+    private static bool IsSequelTitle(string text)
+        => SequelRe.IsMatch(text);
+
+    private static bool ContainsSeasonNumber(string text, int n)
+    {
+        text = text.ToLowerInvariant();
+        var indicators = n switch
+        {
+            2 => new[] { "2nd", "season 2", " ii", "part 2", " 2 " },
+            3 => new[] { "3rd", "season 3", " iii", "part 3" },
+            4 => new[] { "4th", "season 4", " iv", "part 4" },
+            5 => new[] { "5th", "season 5", " v ", "part 5" },
+            _ => new[] { $"{n}th", $"season {n}", $"part {n}", $" {n}", $"{n} " },
+        };
+        return indicators.Any(text.Contains);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // LOCAL RECORD TYPES (JSON DTOs)
+    // ═════════════════════════════════════════════════════════════════════
+
+    private record CacheEntry(string MalId, DateTime CachedAt);
+    private record SyncState(int WatchedCount, string Status);
+
+    private sealed class MalUserEntry
+    {
+        public string Title { get; set; } = string.Empty;
+        public int Total { get; set; }
+        public string AiringStatus { get; set; } = string.Empty;
+        public int Watched { get; set; }
+        public string Status { get; set; } = string.Empty;
+    }
+
+    // ── Jellyfin JSON DTOs ─────────────────────────────────────────────
+    private sealed class JfItemsResponse { [JsonPropertyName("Items")] public List<JfItem>? Items { get; set; } }
+    private sealed class JfItem
+    {
+        [JsonPropertyName("Id")] public string Id { get; set; } = string.Empty;
+        [JsonPropertyName("Name")] public string? Name { get; set; }
+        [JsonPropertyName("Type")] public string? Type { get; set; }
+        [JsonPropertyName("Path")] public string? Path { get; set; }
+        [JsonPropertyName("IndexNumber")] public int? IndexNumber { get; set; }
+        [JsonPropertyName("ProviderIds")] public Dictionary<string, string>? ProviderIds { get; set; }
+        [JsonPropertyName("UserData")] public JfUserData? UserData { get; set; }
+    }
+    private sealed class JfUserData { [JsonPropertyName("Played")] public bool Played { get; set; } }
+
+    // ── MAL JSON DTOs ──────────────────────────────────────────────────
+    private sealed class MalListPage
+    {
+        [JsonPropertyName("data")] public List<MalListEntry>? Data { get; set; }
+        [JsonPropertyName("paging")] public MalPaging? Paging { get; set; }
+    }
+    private sealed class MalListEntry
+    {
+        [JsonPropertyName("node")] public MalNode Node { get; set; } = new();
+        [JsonPropertyName("list_status")] public MalListStatus? ListStatus { get; set; }
+    }
+    private sealed class MalNode
+    {
+        [JsonPropertyName("id")] public int Id { get; set; }
+        [JsonPropertyName("title")] public string? Title { get; set; }
+        [JsonPropertyName("num_episodes")] public int NumEpisodes { get; set; }
+        [JsonPropertyName("status")] public string? Status { get; set; }
+        [JsonPropertyName("alternative_titles")] public MalAltTitles? AlternativeTitles { get; set; }
+    }
+    private sealed class MalAltTitles
+    {
+        [JsonPropertyName("en")] public string? En { get; set; }
+        [JsonPropertyName("synonyms")] public List<string>? Synonyms { get; set; }
+    }
+    private sealed class MalListStatus
+    {
+        [JsonPropertyName("num_episodes_watched")] public int NumEpisodesWatched { get; set; }
+        [JsonPropertyName("status")] public string? Status { get; set; }
+    }
+    private sealed class MalPaging { [JsonPropertyName("next")] public string? Next { get; set; } }
+
+    private sealed class MalAnimeInfo
+    {
+        [JsonPropertyName("num_episodes")] public int NumEpisodes { get; set; }
+        [JsonPropertyName("status")] public string? Status { get; set; }
+    }
+
+    private sealed class MalRelatedResponse
+    {
+        [JsonPropertyName("related_anime")] public List<MalRelatedEntry>? RelatedAnime { get; set; }
+    }
+    private sealed class MalRelatedEntry
+    {
+        [JsonPropertyName("node")] public MalNode Node { get; set; } = new();
+        [JsonPropertyName("relation_type")] public string? RelationType { get; set; }
+    }
+
+    private sealed class MalSearchPage { [JsonPropertyName("data")] public List<MalSearchEntry>? Data { get; set; } }
+    private sealed class MalSearchEntry { [JsonPropertyName("node")] public MalNode Node { get; set; } = new(); }
+}
