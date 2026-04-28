@@ -77,7 +77,7 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 
 1. Open Jellyfin → **Dashboard → Plugins → MAL Sync**
 2. Enter your **MAL Client-ID** (from [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig)) and save
-   - When creating the MAL app, set the redirect URL to: `https://myanimelist.net/api/v2/oauth2/callback`
+   - When creating the MAL app, set the redirect URL to: `http://localhost`
 3. Select which **library paths** contain your anime
 4. Each user opens the plugin page and clicks **Connect MAL account**
 5. A new tab opens — log in to MAL and allow access
