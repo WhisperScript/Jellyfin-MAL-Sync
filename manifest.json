@@ -11,8 +11,8 @@
       {
         "changelog": "- Per-user MAL account page accessible via sidebar (Plugin Pages integration)\n- Per-user sync setting overrides (never-downgrade, MAL\u2192Jellyfin mark) with global fallback\n- Admin banner on user page with link to global settings\n- Dynamic username in MAL account card title",
         "targetAbi": "10.11.0.0",
-        "version": "1.1.1",
-        "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.1.1/Jellyfin.Plugin.MalSync_10.11.0.zip",
+        "version": "1.1.2",
+        "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.1.2/Jellyfin.Plugin.MalSync_10.11.0.zip",
         "checksum": "",
         "timestamp": "2026-04-29T00:00:00"
       },
