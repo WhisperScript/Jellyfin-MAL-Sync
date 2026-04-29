@@ -1,7 +1,7 @@
 # Jellyfin MAL Sync
 
-[![Build & Release](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/actions/workflows/build.yml)
-[![Latest Release](https://img.shields.io/github/v/release/Andrey-Saykin/Jellyfin-MAL-Sync?label=latest)](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/releases/latest)
+[![Build & Release](https://github.com/WhisperScript/Jellyfin-MAL-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/WhisperScript/Jellyfin-MAL-Sync/actions/workflows/build.yml)
+[![Latest Release](https://img.shields.io/github/v/release/WhisperScript/Jellyfin-MAL-Sync?label=latest)](https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin)
 
@@ -32,14 +32,14 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 1. In Jellyfin, go to **Dashboard → Plugins → Repositories**
 2. Click **+ New Repository** and add:
    ```
-   https://raw.githubusercontent.com/Andrey-Saykin/Jellyfin-MAL-Sync/main/manifest.json
+   https://raw.githubusercontent.com/WhisperScript/Jellyfin-MAL-Sync/main/manifest.json
    ```
 3. Go to **Catalog**, find **MAL Sync**, and click **Install**
 4. Restart Jellyfin
 
 ### Manual download
 
-1. Go to the [Releases](https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync/releases/latest) page and download `Jellyfin.Plugin.MalSync_10.11.0.zip`
+1. Go to the [Releases](https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/latest) page and download `Jellyfin.Plugin.MalSync_10.11.0.zip`
 2. Extract the DLL and copy it into your Jellyfin plugin folder:
 
 ```bash
@@ -61,7 +61,7 @@ sudo docker restart jellyfin
 **Requirements:** [.NET 9 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/9.0)
 
 ```bash
-git clone https://github.com/Andrey-Saykin/Jellyfin-MAL-Sync.git
+git clone https://github.com/WhisperScript/Jellyfin-MAL-Sync.git
 cd Jellyfin-MAL-Sync
 
 dotnet publish Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj \
@@ -122,4 +122,4 @@ Jellyfin.Plugin.MalSync/
 
 ## 📄 License
 
-[MIT](LICENSE) © Andrey Saykin
+[MIT](LICENSE) © WhisperScript
