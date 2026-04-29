@@ -28,5 +28,17 @@ public class MalSyncPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
             Name = Name,
             EmbeddedResourcePath = $"{GetType().Namespace}.Web.configPage.html",
         };
+
+        // User-facing account page — registered in the main sidebar via EnableInMainMenu.
+        // Requires: Plugin Pages plugin (github.com/jellyfin/jellyfin-plugin-pluginpages)
+        yield return new PluginPageInfo
+        {
+            Name = "MalSyncUser",
+            DisplayName = "MAL Sync",
+            EmbeddedResourcePath = $"{GetType().Namespace}.Web.userPage.html",
+            EnableInMainMenu = true,
+            MenuSection = "user",
+            MenuIcon = "sync",
+        };
     }
 }

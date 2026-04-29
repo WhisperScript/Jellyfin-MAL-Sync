@@ -44,7 +44,7 @@ public class PluginConfiguration : BasePluginConfiguration
         AnimePaths.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
-/// <summary>Per-Jellyfin-user MAL token set.</summary>
+/// <summary>Per-Jellyfin-user MAL token set and personal sync preferences.</summary>
 public class UserMalConfig
 {
     /// <summary>Jellyfin user ID (GUID string).</summary>
@@ -54,4 +54,10 @@ public class UserMalConfig
     public DateTime TokenExpiresAt { get; set; } = DateTime.MinValue;
     /// <summary>MAL username shown in the UI after successful auth.</summary>
     public string MalUsername { get; set; } = string.Empty;
+
+    // ── Per-user sync preferences (null = fall back to global setting) ─────
+    /// <summary>Never downgrade MAL progress. null = use global default.</summary>
+    public bool? NoDowngrade { get; set; } = null;
+    /// <summary>Mark Jellyfin episodes from MAL list. null = use global default.</summary>
+    public bool? JfUpdateWatched { get; set; } = null;
 }

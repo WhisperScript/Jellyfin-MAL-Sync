@@ -11,7 +11,9 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 
 ## ✨ Features
 
-<!-- - **Per-user MAL accounts** — each Jellyfin user links their own MAL account via OAuth 2.0 PKCE -->
+- **Per-user MAL accounts** — each Jellyfin user links their own MAL account via OAuth 2.0 PKCE
+- **User sync page** — dedicated per-user page accessible via sidebar (requires [Plugin Pages](#optional-plugin-pages-sidebar-access))
+- **Per-user setting overrides** — each user can override global sync settings (never-downgrade, MAL→Jellyfin) for their own account
 - **Live sync log** — watch log lines stream in real time via Server-Sent Events as the sync runs
 - **Flexible scheduling** — configured via Jellyfin's built-in Scheduled Tasks (supports daily, interval, and more)
 - **Manual sync** from the Jellyfin dashboard at any time
@@ -44,13 +46,13 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 
 ```bash
 # Standard Linux install
-sudo mkdir -p "/var/lib/jellyfin/plugins/MAL Sync_1.0.0.0"
-sudo cp Jellyfin.Plugin.MalSync.dll "/var/lib/jellyfin/plugins/MAL Sync_1.0.0.0/"
+sudo mkdir -p "/var/lib/jellyfin/plugins/MAL Sync_1.1.1"
+sudo cp Jellyfin.Plugin.MalSync.dll "/var/lib/jellyfin/plugins/MAL Sync_1.1.1/"
 sudo systemctl restart jellyfin
 
 # Docker (adjust the path to your volume mount)
-sudo mkdir -p "/your/jellyfin/data/plugins/MAL Sync_1.0.0.0"
-sudo cp Jellyfin.Plugin.MalSync.dll "/your/jellyfin/data/plugins/MAL Sync_1.0.0.0/"
+sudo mkdir -p "/your/jellyfin/data/plugins/MAL Sync_1.1.1"
+sudo cp Jellyfin.Plugin.MalSync.dll "/your/jellyfin/data/plugins/MAL Sync_1.1.1/"
 sudo docker restart jellyfin
 ```
 
@@ -75,17 +77,36 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 
 ## 🔧 First-time setup
 
+### Admin (one-time)
 1. Open Jellyfin → **Dashboard → Plugins → MAL Sync**
 2. Enter your **MAL Client-ID** (from [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig)) and save
    - When creating the MAL app, set the redirect URL to: `http://localhost`
 3. Select which **library paths** contain your anime
-4. Each user opens the plugin page and clicks **Connect MAL account**
-5. A new tab opens — log in to MAL and allow access
-6. Paste the redirect URL back into the dialog → done ✅
+4. Configure global sync defaults (never-downgrade, MAL→Jellyfin mark)
+
+### Each user
+5. Open the **MAL Sync** page in the sidebar (under *Plugin Settings* — see [Plugin Pages](#optional-plugin-pages-sidebar-access) below)
+   - Admins can also access it from **Dashboard → Plugins → MAL Sync**
+6. Click **Connect MAL account**
+7. A new tab opens — log in to MAL and allow access
+8. Paste the redirect URL back into the dialog → done ✅
+9. Optionally override the global sync settings in **Personal Sync Settings**
+
+### Optional: Plugin Pages sidebar access
+
+To show a **MAL Sync** entry in the sidebar for all users, install the [Plugin Pages](https://github.com/jellyfin/jellyfin-plugin-pluginpages) plugin (available in the official Jellyfin catalog), then add the following entry to its configuration (`Dashboard → Plugins → Plugin Pages`):
+
+| Field | Value |
+|---|---|
+| URL | `configurationpage?name=MalSyncUser` |
+| Display text | `MAL Sync` |
+| Icon | `sync` |
 
 ---
 
 ## ⚙️ Configuration reference
+
+### Global settings (admin, Dashboard → Plugins → MAL Sync)
 
 | Setting | Default | Description |
 |---|---|---|
@@ -96,6 +117,15 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 | Mark Jellyfin from MAL | `false` | Also mark episodes played in Jellyfin if watched on MAL |
 | Cache TTL | `30` days | How long MAL-ID lookups are cached locally |
 
+### Per-user overrides (user page → Personal Sync Settings)
+
+Each user can override the two sync-behaviour settings for their own account. Leaving a setting unchecked/un-toggled falls back to the global default set by the admin.
+
+| Setting | Description |
+|---|---|
+| Never downgrade | Personal override: don't let MAL progress go backwards for this account |
+| Mark Jellyfin from MAL | Personal override: mark episodes as played in Jellyfin based on this user's MAL list |
+
 ---
 
 ## 🗂 Project structure
@@ -103,16 +133,17 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 ```
 Jellyfin.Plugin.MalSync/
 ├── Api/
-│   └── MalSyncController.cs     REST endpoints for the UI (incl. SSE stream)
+│   └── MalSyncController.cs     REST endpoints for the UI (incl. SSE stream, per-user config)
 ├── Configuration/
-│   └── PluginConfiguration.cs   Settings + per-user token store
+│   └── PluginConfiguration.cs   Global settings + per-user token & override store
 ├── Services/
 │   ├── MalAuthService.cs        OAuth 2.0 PKCE + token refresh
-│   └── MalSyncService.cs        Core sync logic
+│   └── MalSyncService.cs        Core sync logic (respects per-user overrides)
 ├── Tasks/
 │   └── MalSyncTask.cs           Scheduled task (auto-sync)
 ├── Web/
-│   └── configPage.html          Dashboard UI page
+│   ├── configPage.html          Admin dashboard page (global settings + MAL account)
+│   └── userPage.html            User-facing page (MAL account + personal sync settings)
 ├── MalSyncPlugin.cs             Plugin entry-point
 └── PluginServiceRegistrator.cs  DI registration
 ```

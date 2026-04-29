@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Web\configPage.html" />
+    <EmbeddedResource Include="Web\userPage.html" />
   </ItemGroup>
 
 </Project>

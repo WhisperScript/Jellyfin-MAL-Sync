@@ -239,7 +239,7 @@
 
     <!-- ══════════════════════════════════════ MAL ACCOUNT -->
     <div class="ms-card">
-        <p class="ms-card-title">MyAnimeList Account</p>
+        <p id="malAccountTitle" class="ms-card-title">MyAnimeList Account</p>
 
         <div class="ms-status-row">
             <span id="malBadge" class="ms-badge ms-badge-err">○ Not connected</span>
@@ -361,7 +361,16 @@ window.MalSync = (function () {
         q('btnSync').addEventListener('click', function () { runSync(false); });
         q('btnDryRun').addEventListener('click', function () { runSync(true); });
 
-        await Promise.allSettled([loadConfig(), refreshStatus()]);
+        await Promise.allSettled([loadConfig(), refreshStatus(), loadAccountTitle()]);
+    }
+
+    // ── account card title ────────────────────────────────────────────────
+    async function loadAccountTitle() {
+        try {
+            const me = await jfGet('/Users/Me');
+            const name = me.Name || me.name;
+            if (name) q('malAccountTitle').textContent = name + '\u2019s MyAnimeList Account';
+        } catch (_) { /* non-fatal */ }
     }
 
     // ── config ────────────────────────────────────────────────────────────
