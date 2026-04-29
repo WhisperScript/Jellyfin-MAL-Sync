@@ -92,7 +92,7 @@ jobs:
                 {
                   "changelog": "",
                   "targetAbi": "10.11.0.0",
-                  "version": "0.0.1",
+                  "version": "1.1.0",
                   "sourceUrl": source_url,
                   "checksum": checksum,
                   "timestamp": timestamp,
