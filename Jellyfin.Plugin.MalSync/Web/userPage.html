@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>MAL Sync – Account</title>
+    <meta charset="utf-8" />
+</head>
+<body>
+<div id="MalSyncUserPage" data-role="page" class="page libraryPage">
+<style>
+        .ms-page { max-width: 680px; }
+
+        .ms-card {
+            background: var(--card-background, rgba(255,255,255,.04));
+            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
+            border-radius: 6px;
+            padding: 1.4em 1.6em;
+            margin-bottom: 1.4em;
+        }
+        .ms-card-title {
+            font-size: .78em;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--accent-color, #00a4dc);
+            opacity: .85;
+            margin: 0 0 1.1em;
+            padding-bottom: .55em;
+            border-bottom: 1px solid var(--accent-color, #00a4dc);
+        }
+
+        .ms-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: .45em;
+            padding: .5em 1.2em;
+            border-radius: 3px;
+            border: none;
+            font-size: .875em;
+            font-weight: 600;
+            letter-spacing: .02em;
+            cursor: pointer;
+            transition: opacity .15s, filter .15s;
+            white-space: nowrap;
+            line-height: 1.4;
+            background: var(--button-background, rgba(255,255,255,.1));
+            color: var(--button-foreground, inherit);
+        }
+        .ms-btn:hover  { filter: brightness(1.15); }
+        .ms-btn:active { filter: brightness(.88); }
+        .ms-btn:disabled { opacity: .38; cursor: default; pointer-events: none; }
+        .ms-btn-primary { background: var(--accent-color, #00a4dc); color: #fff; }
+        .ms-btn-danger  { background: rgba(220, 53, 69, .8); color: #fff; }
+        .ms-btn-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .55em;
+            align-items: center;
+            margin-top: 1.1em;
+        }
+
+        .ms-status-row {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            padding: .8em 1em;
+            border-radius: 5px;
+            background: rgba(255,255,255,.03);
+            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
+            margin-bottom: 1.2em;
+        }
+        .ms-badge {
+            padding: .2em .75em;
+            border-radius: 2em;
+            font-size: .72em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ms-badge-ok  { background: rgba(39,174,96,.25);  color: #4fd98a; border: 1px solid rgba(39,174,96,.55); }
+        .ms-badge-err { background: rgba(220,53,69,.22);  color: #ff8096; border: 1px solid rgba(220,53,69,.45); }
+        .ms-meta      { flex: 1; min-width: 0; line-height: 1.4; }
+        .ms-meta-name { font-weight: 600; font-size: .95em; }
+        .ms-meta-sub  { font-size: .78em; opacity: .45; margin-top: .1em; }
+
+        .ms-hint {
+            border-left: 3px solid var(--accent-color, #00a4dc);
+            background: rgba(0,164,220,.06);
+            padding: .6em .95em;
+            border-radius: 0 4px 4px 0;
+            margin-bottom: .6em;
+            font-size: .85em;
+            line-height: 1.5;
+        }
+
+        .ms-check-row {
+            display: flex;
+            align-items: flex-start;
+            gap: .65em;
+            cursor: pointer;
+            margin: .65em 0;
+            padding: .55em .75em;
+            border-radius: 4px;
+            transition: background .12s;
+        }
+        .ms-check-row:hover { background: rgba(255,255,255,.04); }
+        .ms-check-row input[type=checkbox] {
+            margin-top: .18em;
+            flex-shrink: 0;
+            width: 1em; height: 1em;
+            cursor: pointer;
+            accent-color: var(--accent-color, #00a4dc);
+        }
+        .ms-check-label { font-size: .9em; font-weight: 600; }
+        .ms-check-sub   { font-size: .78em; opacity: .5; margin-top: .1em; }
+
+        .ms-log {
+            background: rgba(0,0,0,.5);
+            border: 1px solid var(--divider-color, rgba(255,255,255,.07));
+            border-radius: 4px;
+            padding: .85em 1em;
+            font-family: 'Consolas', 'SF Mono', 'Fira Mono', monospace;
+            font-size: .8em;
+            max-height: 360px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-top: 1em;
+        }
+        .ms-log .log-info { color: #78c8d8; }
+        .ms-log .log-ok   { color: #5de0a0; }
+        .ms-log .log-warn { color: #ffd166; }
+        .ms-log .log-err  { color: #ff6b6b; }
+        .ms-log .log-dbg  { color: rgba(160,180,200,.38); font-size: .9em; }
+
+        .ms-spinner {
+            display: none;
+            width: 1em; height: 1em;
+            border: 2px solid rgba(255,255,255,.15);
+            border-top-color: var(--accent-color, #00a4dc);
+            border-radius: 50%;
+            animation: ms-spin .6s linear infinite;
+            flex-shrink: 0;
+        }
+        .ms-spinner.active { display: inline-block; }
+        @keyframes ms-spin { to { transform: rotate(360deg); } }
+
+        .ms-hidden    { display: none !important; }
+        .ms-field-desc { font-size: .78em; opacity: .45; margin-top: .25em; line-height: 1.4; }
+        .ms-save-status { font-size: .82em; opacity: .7; }
+
+        /* ── Admin banner ────────────────────────────────────────────────── */
+        .ms-admin-banner {
+            display: flex;
+            align-items: center;
+            gap: .75em;
+            padding: .7em 1em;
+            border-radius: 5px;
+            background: rgba(0,164,220,.08);
+            border: 1px solid rgba(0,164,220,.25);
+            margin-bottom: 1.4em;
+            font-size: .85em;
+            line-height: 1.4;
+        }
+        .ms-admin-banner a { color: var(--accent-color, #00a4dc); text-decoration: none; }
+        .ms-admin-banner a:hover { text-decoration: underline; }
+</style>
+
+<div class="content-primary ms-page">
+
+    <!-- ══════════════════════════════════════ ADMIN BANNER (hidden by default) -->
+    <div id="u-adminBanner" class="ms-admin-banner ms-hidden">
+        <span style="font-size:1.3em">⚙</span>
+        <span>You are an administrator. Global settings (Client-ID, anime paths, schedule) are managed in
+        <a href="#!/configurationpage?name=MAL+Sync">Dashboard → Plugins → MAL Sync</a>.</span>
+    </div>
+
+    <!-- ══════════════════════════════════════ MAL ACCOUNT -->
+    <div class="ms-card">
+        <p id="u-malAccountTitle" class="ms-card-title">MyAnimeList Account</p>
+
+        <div class="ms-status-row">
+            <span id="u-malBadge" class="ms-badge ms-badge-err">○ Not connected</span>
+            <div class="ms-meta">
+                <div id="u-malUsername" class="ms-meta-name"></div>
+                <div id="u-malExpiry"   class="ms-meta-sub"></div>
+            </div>
+        </div>
+
+        <div id="u-authStep1">
+            <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
+                Click <strong>Connect</strong> to open MAL authorisation in a new tab.
+                After approving, copy the full redirect URL back here.
+            </p>
+            <button id="u-btnConnect" type="button" class="ms-btn ms-btn-primary">Connect MAL Account</button>
+        </div>
+
+        <div id="u-authStep2" class="ms-hidden">
+            <div class="ms-hint"><strong>Step 1:</strong> Log in to MAL in the new tab and click <em>Allow access</em>.</div>
+            <div class="ms-hint"><strong>Step 2:</strong> You'll land on an error page — that's expected. Copy the full URL from the address bar and paste it below.</div>
+            <div class="inputContainer">
+                <label class="inputLabel inputLabelUnfocused" for="u-callbackUrl">Redirect URL</label>
+                <input id="u-callbackUrl" class="emby-input" type="text" placeholder="http://localhost/?code=…" />
+            </div>
+            <div class="ms-btn-row">
+                <button id="u-btnVerify"     type="button" class="ms-btn ms-btn-primary">Verify</button>
+                <button id="u-btnCancelAuth" type="button" class="ms-btn">Cancel</button>
+            </div>
+        </div>
+
+        <div id="u-authDisconnect" class="ms-hidden" style="margin-top:.6em">
+            <button id="u-btnDisconnect" type="button" class="ms-btn ms-btn-danger">Disconnect MAL Account</button>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ SYNC -->
+    <div class="ms-card">
+        <p class="ms-card-title">Sync</p>
+
+        <label class="ms-check-row" style="margin:0 0 .9em">
+            <input id="u-cfgDebug" type="checkbox" />
+            <span>
+                <div class="ms-check-label">Verbose / debug output</div>
+                <div class="ms-check-sub">Shows every series evaluated, including skipped ones</div>
+            </span>
+        </label>
+
+        <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
+            <button id="u-btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
+            <button id="u-btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+            <span id="u-syncSpinner" class="ms-spinner"></span>
+        </div>
+
+        <div id="u-syncLog" class="ms-log ms-hidden"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════ PERSONAL SETTINGS -->
+    <div class="ms-card">
+        <p class="ms-card-title">Personal Sync Settings</p>
+        <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.85em;opacity:.65">
+            These override the server-wide defaults for your account only.
+        </p>
+
+        <label class="ms-check-row">
+            <input id="u-cfgNoDowngrade" type="checkbox" />
+            <span>
+                <div class="ms-check-label">Never downgrade MAL progress</div>
+                <div class="ms-check-sub">Won't reduce your episode count on MAL if Jellyfin shows fewer watched</div>
+            </span>
+        </label>
+
+        <label class="ms-check-row">
+            <input id="u-cfgJfWatched" type="checkbox" />
+            <span>
+                <div class="ms-check-label">Mark Jellyfin episodes from MAL</div>
+                <div class="ms-check-sub">Also marks episodes as watched in Jellyfin based on your MAL list</div>
+            </span>
+        </label>
+
+        <div class="ms-btn-row">
+            <button id="u-btnSaveUserConfig" type="button" class="ms-btn ms-btn-primary">Save Personal Settings</button>
+            <span id="u-userCfgStatus" class="ms-save-status"></span>
+        </div>
+    </div>
+
+</div><!-- /content-primary -->
+
+<script type="text/javascript">
+/* global ApiClient */
+
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
+function _uJfHeaders() {
+    return { 'X-Emby-Token': ApiClient.accessToken() };
+}
+function _uJfBase() {
+    return ApiClient.serverAddress().replace(/\/$/, '');
+}
+async function uJfGet(path) {
+    const r = await fetch(_uJfBase() + path, { headers: _uJfHeaders() });
+    if (!r.ok) {
+        const j = await r.json().catch(function () { return {}; });
+        throw Object.assign(new Error(j.error || 'HTTP ' + r.status), { status: r.status, responseJSON: j });
+    }
+    return r.json();
+}
+async function uJfPost(path, data) {
+    const r = await fetch(_uJfBase() + path, {
+        method: 'POST',
+        headers: { ..._uJfHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    if (!r.ok) {
+        const j = await r.json().catch(function () { return {}; });
+        throw Object.assign(new Error(j.error || 'HTTP ' + r.status), { status: r.status, responseJSON: j });
+    }
+    return r.json();
+}
+
+// ── Page module ───────────────────────────────────────────────────────────────
+window.MalSyncUser = (function () {
+    let _initialized = false;
+    function q(id) { return document.getElementById(id); }
+
+    function logLine(container, text) {
+        const t = text ?? '';
+        const cls = (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) ? 'log-err'
+                  : t.startsWith('[DRY RUN]')                                 ? 'log-warn'
+                  : t.startsWith('[MAL]')                                     ? 'log-ok'
+                  : t.startsWith('[DEBUG]') || t.startsWith('[DBG]')          ? 'log-dbg'
+                  : 'log-info';
+        const div = document.createElement('div');
+        div.className   = cls;
+        div.textContent = t;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    async function init() {
+        if (_initialized) return;
+        _initialized = true;
+
+        q('u-btnConnect').addEventListener('click', startAuth);
+        q('u-btnVerify').addEventListener('click', submitCode);
+        q('u-btnCancelAuth').addEventListener('click', cancelAuth);
+        q('u-btnDisconnect').addEventListener('click', disconnect);
+        q('u-btnSync').addEventListener('click', function () { runSync(false); });
+        q('u-btnDryRun').addEventListener('click', function () { runSync(true); });
+        q('u-btnSaveUserConfig').addEventListener('click', saveUserConfig);
+
+        await Promise.allSettled([refreshStatus(), loadAccountTitle(), loadUserConfig(), checkAdmin()]);
+    }
+
+    // ── account card title ────────────────────────────────────────────────
+    async function loadAccountTitle() {
+        try {
+            const me = await uJfGet('/Users/Me');
+            const name = me.Name || me.name;
+            if (name) q('u-malAccountTitle').textContent = name + '\u2019s MyAnimeList Account';
+        } catch (_) { /* non-fatal */ }
+    }
+
+    // ── admin banner ──────────────────────────────────────────────────────
+    async function checkAdmin() {
+        try {
+            const r = await uJfGet('/MalSync/is-admin');
+            if (r.isAdmin) q('u-adminBanner').classList.remove('ms-hidden');
+        } catch (_) { /* non-fatal */ }
+    }
+
+    // ── personal settings ─────────────────────────────────────────────────
+    async function loadUserConfig() {
+        try {
+            const cfg = await uJfGet('/MalSync/user/config');
+            q('u-cfgNoDowngrade').checked = cfg.noDowngrade     ?? true;
+            q('u-cfgJfWatched').checked   = cfg.jfUpdateWatched ?? false;
+        } catch (_) { /* non-fatal */ }
+    }
+
+    async function saveUserConfig() {
+        const status = q('u-userCfgStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/user/config', {
+                noDowngrade:     q('u-cfgNoDowngrade').checked,
+                jfUpdateWatched: q('u-cfgJfWatched').checked,
+            });
+            status.textContent = '✔ Saved';
+            status.style.color = '#74c69d';
+        } catch (e) {
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error');
+            status.style.color = '#e76f51';
+        }
+        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
+    }
+
+    // ── auth status ───────────────────────────────────────────────────────
+    async function refreshStatus() {
+        try {
+            const s = await uJfGet('/MalSync/status');
+            const badge    = q('u-malBadge');
+            const username = q('u-malUsername');
+            const expiry   = q('u-malExpiry');
+            const step1    = q('u-authStep1');
+            const step2    = q('u-authStep2');
+            const disc     = q('u-authDisconnect');
+            const syncCard = q('u-btnSync').closest('.ms-card');
+
+            if (s.authenticated) {
+                badge.className   = 'ms-badge ms-badge-ok';
+                badge.textContent = '● Connected';
+                username.textContent = s.malUsername ?? '';
+                if (s.tokenExpires) {
+                    const d = new Date(s.tokenExpires);
+                    expiry.textContent = 'Token expires ' + d.toLocaleDateString();
+                }
+                step1.classList.add('ms-hidden');
+                step2.classList.add('ms-hidden');
+                disc.classList.remove('ms-hidden');
+                syncCard && syncCard.classList.remove('ms-hidden');
+            } else {
+                badge.className   = 'ms-badge ms-badge-err';
+                badge.textContent = '○ Not connected';
+                username.textContent = '';
+                expiry.textContent   = '';
+                step1.classList.remove('ms-hidden');
+                step2.classList.add('ms-hidden');
+                disc.classList.add('ms-hidden');
+                syncCard && syncCard.classList.add('ms-hidden');
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    // ── auth flow ─────────────────────────────────────────────────────────
+    async function startAuth() {
+        const newWin = window.open('about:blank', '_blank');
+        try {
+            const r = await uJfGet('/MalSync/auth/start');
+            if (newWin) newWin.location.href = r.authUrl;
+            q('u-authStep1').classList.add('ms-hidden');
+            q('u-authStep2').classList.remove('ms-hidden');
+        } catch (e) {
+            if (newWin) newWin.close();
+            const msg = e.status === 400
+                ? 'MAL Client-ID is not configured. Please ask your server admin to set it up first.'
+                : (e.responseJSON?.error ?? 'Could not start auth flow.');
+            alert('Error: ' + msg);
+        }
+    }
+
+    function cancelAuth() {
+        q('u-authStep2').classList.add('ms-hidden');
+        q('u-authStep1').classList.remove('ms-hidden');
+        q('u-callbackUrl').value = '';
+    }
+
+    async function submitCode() {
+        const raw = q('u-callbackUrl').value.trim();
+        if (!raw) { alert('Please paste the redirect URL or code.'); return; }
+        const match = raw.match(/[?&]code=([^&]+)/);
+        const code  = match ? decodeURIComponent(match[1]) : raw;
+        try {
+            await uJfPost('/MalSync/auth/callback', { code });
+            q('u-callbackUrl').value = '';
+            await refreshStatus();
+        } catch (e) {
+            alert('Auth failed: ' + (e.responseJSON?.error ?? e.message));
+        }
+    }
+
+    async function disconnect() {
+        if (!confirm('Disconnect your MAL account? Your watch history on MAL will not be affected.')) return;
+        try {
+            await uJfPost('/MalSync/auth/disconnect', {});
+            await refreshStatus();
+        } catch (e) { alert('Error: ' + (e.responseJSON?.error ?? 'Could not disconnect.')); }
+    }
+
+    // ── sync ──────────────────────────────────────────────────────────────
+    async function runSync(dryRun) {
+        const logDiv  = q('u-syncLog');
+        const spinner = q('u-syncSpinner');
+        const btnSync = q('u-btnSync');
+        const btnDry  = q('u-btnDryRun');
+        const debug   = q('u-cfgDebug') && q('u-cfgDebug').checked;
+
+        logDiv.innerHTML = '';
+        logDiv.classList.remove('ms-hidden');
+        spinner.classList.add('active');
+        btnSync.disabled = btnDry.disabled = true;
+
+        try {
+            const url = _uJfBase() + '/MalSync/sync/stream?dryRun=' + dryRun + '&debug=' + (debug ? 'true' : 'false');
+            const response = await fetch(url, { headers: _uJfHeaders() });
+            if (!response.ok) {
+                logLine(logDiv, '[ERROR] HTTP ' + response.status + ': sync request failed.');
+                return;
+            }
+
+            const reader  = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            outer: while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                    const chunk = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+                    if (chunk.startsWith('data: ')) {
+                        const text = chunk.slice(6);
+                        if (text === '[DONE]') { break outer; }
+                        if (text.trim()) { logLine(logDiv, text); }
+                    }
+                }
+            }
+        } catch (e) {
+            logLine(logDiv, '[ERROR] ' + (e.message ?? 'Sync failed unexpectedly.'));
+        } finally {
+            spinner.classList.remove('active');
+            btnSync.disabled = btnDry.disabled = false;
+            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    return { init: init };
+}());
+
+// ── Jellyfin page lifecycle ───────────────────────────────────────────────────
+window.MalSyncUserPage = {
+    config: function () { return { enableScrollX: false }; },
+    init:   function ()  { MalSyncUser.init(); },
+};
+
+(function () {
+    var attempts = 0;
+    function tryInit() {
+        if (document.getElementById('u-btnConnect')) { MalSyncUser.init(); return; }
+        if (++attempts < 100) setTimeout(tryInit, 100);
+    }
+    setTimeout(tryInit, 0);
+}());
+</script>
+
+</div><!-- /MalSyncUserPage -->
+</body>
+</html>

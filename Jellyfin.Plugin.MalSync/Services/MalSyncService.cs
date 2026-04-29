@@ -79,6 +79,11 @@ public sealed class MalSyncService
 
         var cfg = MalSyncPlugin.Instance!.Configuration;
 
+        // ── Resolve per-user settings (fall back to global) ───────────
+        var userCfg = _auth.GetOrCreateUserConfig(jellyfinUserId);
+        var effectiveNoDowngrade = userCfg.NoDowngrade ?? cfg.MalNoDowngrade;
+        var effectiveJfUpdateWatched = userCfg.JfUpdateWatched ?? cfg.JfUpdateWatched;
+
         // ── Get MAL access token ───────────────────────────────────────
         var token = await _auth.GetAccessTokenAsync(jellyfinUserId).ConfigureAwait(false);
         if (token is null)
@@ -230,7 +235,7 @@ public sealed class MalSyncService
                 var label = (seasonNum > 1 || realSeasons.Count > 1) ? $"{seriesName} S{seasonNum}" : seriesName;
 
                 // ── MAL → Jellyfin: mark episodes played ───────────────
-                if (cfg.JfUpdateWatched && malEntry?.Watched > 0)
+                if (effectiveJfUpdateWatched && malEntry?.Watched > 0)
                 {
                     MarkJfWatched(jfUser, episodes, malEntry.Watched, seasonOffset, label, dryRun);
                 }
@@ -249,7 +254,7 @@ public sealed class MalSyncService
                 // ── Change detection ───────────────────────────────────
                 if (malEntry is not null)
                 {
-                    if (cfg.MalNoDowngrade)
+                    if (effectiveNoDowngrade)
                     {
                         var rank = new Dictionary<string, int>
                         { ["completed"] = 3, ["watching"] = 2, ["on_hold"] = 1, ["plan_to_watch"] = 0, ["dropped"] = 0 };

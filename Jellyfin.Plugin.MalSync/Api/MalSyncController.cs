@@ -1,3 +1,5 @@
+using Jellyfin.Data;
+using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.MalSync.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
@@ -20,17 +22,20 @@ public sealed class MalSyncController : ControllerBase
     private readonly MalSyncService _sync;
     private readonly ILibraryManager _libraryManager;
     private readonly ITaskManager _taskManager;
+    private readonly IUserManager _userManager;
 
     public MalSyncController(
         MalAuthService auth,
         MalSyncService sync,
         ILibraryManager libraryManager,
-        ITaskManager taskManager)
+        ITaskManager taskManager,
+        IUserManager userManager)
     {
         _auth = auth;
         _sync = sync;
         _libraryManager = libraryManager;
         _taskManager = taskManager;
+        _userManager = userManager;
     }
 
     // ── GET /MalSync/status ───────────────────────────────────────────────
@@ -260,6 +265,55 @@ public sealed class MalSyncController : ControllerBase
         try { await syncTask.ConfigureAwait(false); } catch { /* already handled inside */ }
     }
 
+    // ── GET /MalSync/user/config ──────────────────────────────────────────
+    /// <summary>Returns per-user sync preferences for the calling user.</summary>
+    [HttpGet("user/config")]
+    [Authorize]
+    public IActionResult GetUserConfig()
+    {
+        var userId = GetUserId();
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var uc = _auth.GetOrCreateUserConfig(userId);
+        return Ok(new
+        {
+            // Return per-user value if set, otherwise the global default
+            noDowngrade = uc.NoDowngrade ?? cfg.MalNoDowngrade,
+            jfUpdateWatched = uc.JfUpdateWatched ?? cfg.JfUpdateWatched,
+            // Indicate whether the value is a personal override or the global default
+            noDowngradeIsPersonal = uc.NoDowngrade.HasValue,
+            jfUpdateWatchedIsPersonal = uc.JfUpdateWatched.HasValue,
+        });
+    }
+
+    // ── POST /MalSync/user/config ─────────────────────────────────────────
+    /// <summary>Saves per-user sync preferences for the calling user.</summary>
+    [HttpPost("user/config")]
+    [Authorize]
+    public IActionResult SaveUserConfig([FromBody] UserConfigRequest body)
+    {
+        var userId = GetUserId();
+        var uc = _auth.GetOrCreateUserConfig(userId);
+
+        // null in the request means "reset to global default"
+        uc.NoDowngrade = body.NoDowngrade;
+        uc.JfUpdateWatched = body.JfUpdateWatched;
+
+        MalSyncPlugin.Instance!.SaveConfiguration();
+        return Ok(new { message = "Personal settings saved." });
+    }
+
+    // ── GET /MalSync/is-admin ─────────────────────────────────────────────
+    /// <summary>Returns whether the calling user is a Jellyfin administrator.</summary>
+    [HttpGet("is-admin")]
+    [Authorize]
+    public IActionResult GetIsAdmin()
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return Ok(new { isAdmin = false });
+        var user = _userManager.GetUserById(Guid.Parse(userId));
+        return Ok(new { isAdmin = user?.HasPermission(PermissionKind.IsAdministrator) ?? false });
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private string GetUserId()
@@ -290,5 +344,11 @@ public sealed class MalSyncController : ControllerBase
         public int? SyncMinute { get; set; }
         public bool? SyncUseInterval { get; set; }
         public int? SyncIntervalMinutes { get; set; }
+    }
+
+    public sealed class UserConfigRequest
+    {
+        public bool? NoDowngrade { get; set; }
+        public bool? JfUpdateWatched { get; set; }
     }
 }

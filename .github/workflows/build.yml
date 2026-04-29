@@ -76,10 +76,14 @@ jobs:
             --notes "Automated dev build from branch \`${BRANCH}\`. Not for production use." \
             --prerelease
 
+          # Read version from csproj (strip trailing .0 for 3-part version)
+          VERSION_FULL=$(grep -oP '(?<=<Version>)[^<]+' Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj)
+          DEV_VERSION=$(echo "$VERSION_FULL" | sed 's/\.0$//')
+
           # Update manifest-dev.json on this branch
-          python3 - "$CHECKSUM" "$SOURCE_URL" "$TIMESTAMP" <<'PYEOF'
+          python3 - "$DEV_VERSION" "$CHECKSUM" "$SOURCE_URL" "$TIMESTAMP" <<'PYEOF'
           import json, sys
-          checksum, source_url, timestamp = sys.argv[1:]
+          version, checksum, source_url, timestamp = sys.argv[1:]
           manifest = [
             {
               "name": "MAL Sync (Dev)",
@@ -92,7 +96,7 @@ jobs:
                 {
                   "changelog": "",
                   "targetAbi": "10.11.0.0",
-                  "version": "1.1.0",
+                  "version": version,
                   "sourceUrl": source_url,
                   "checksum": checksum,
                   "timestamp": timestamp,
@@ -127,14 +131,24 @@ jobs:
           version, checksum, source_url, timestamp = sys.argv[1:]
           with open('manifest.json') as f:
               m = json.load(f)
-          m[0]['versions'].insert(0, {
-              'changelog': '',
-              'targetAbi': '10.11.0.0',
-              'version': version,
-              'sourceUrl': source_url,
-              'checksum': checksum,
-              'timestamp': timestamp,
-          })
+          existing = next((v for v in m[0]['versions'] if v['version'] == version), None)
+          if existing:
+              # Update in-place, keep existing changelog
+              existing['checksum'] = checksum
+              existing['sourceUrl'] = source_url
+              existing['timestamp'] = timestamp
+              # Make sure it's at position 0
+              m[0]['versions'].remove(existing)
+              m[0]['versions'].insert(0, existing)
+          else:
+              m[0]['versions'].insert(0, {
+                  'changelog': '',
+                  'targetAbi': '10.11.0.0',
+                  'version': version,
+                  'sourceUrl': source_url,
+                  'checksum': checksum,
+                  'timestamp': timestamp,
+              })
           with open('manifest.json', 'w') as f:
               json.dump(m, f, indent=2)
               f.write('\n')
