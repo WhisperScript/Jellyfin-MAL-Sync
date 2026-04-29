@@ -12,7 +12,7 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 ## ✨ Features
 
 - **Per-user MAL accounts** — each Jellyfin user links their own MAL account via OAuth 2.0 PKCE
-- **User sync page** — dedicated per-user page accessible via sidebar (requires [Plugin Pages](#optional-plugin-pages-sidebar-access))
+- **User sync page** — dedicated per-user page accessible via sidebar (requires [](#optional-plugin-pages-sidebar-access))
 - **Per-user setting overrides** — each user can override global sync settings (never-downgrade, MAL→Jellyfin) for their own account
 - **Live sync log** — watch log lines stream in real time via Server-Sent Events as the sync runs
 - **Flexible scheduling** — configured via Jellyfin's built-in Scheduled Tasks (supports daily, interval, and more)
@@ -94,7 +94,7 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 
 ### Optional: Plugin Pages sidebar access
 
-To show a **MAL Sync** entry in the sidebar for all users, install the [Plugin Pages](https://github.com/jellyfin/jellyfin-plugin-pluginpages) plugin (available in the official Jellyfin catalog), then add the following entry to its configuration (`Dashboard → Plugins → Plugin Pages`):
+To show a **MAL Sync** entry in the sidebar for all users, install the [Plugin Pages](https://github.com/IAmParadox27/jellyfin-plugin-pages) plugin (available in the official Jellyfin catalog), then add the following entry to its configuration (`Dashboard → Plugins → `):
 
 | Field | Value |
 |---|---|
