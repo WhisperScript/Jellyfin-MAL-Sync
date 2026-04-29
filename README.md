@@ -11,9 +11,9 @@ A Jellyfin plugin that keeps your **MyAnimeList** watch progress in sync with wh
 
 ## ✨ Features
 
-- **Per-user MAL accounts** — each Jellyfin user links their own MAL account via OAuth 2.0 PKCE
+<!-- - **Per-user MAL accounts** — each Jellyfin user links their own MAL account via OAuth 2.0 PKCE -->
 - **Live sync log** — watch log lines stream in real time via Server-Sent Events as the sync runs
-- **Flexible scheduling** — daily trigger at a set time *or* interval-based (every N minutes)
+- **Flexible scheduling** — configured via Jellyfin's built-in Scheduled Tasks (supports daily, interval, and more)
 - **Manual sync** from the Jellyfin dashboard at any time
 - **Dry-run / preview mode** — see exactly what would change before writing anything to MAL
 - **Debug mode** — verbose log showing every series evaluated, MAL ID resolution steps, and sequel chain traversal
@@ -91,7 +91,6 @@ The built DLL will be at `dist/Jellyfin.Plugin.MalSync.dll`.
 |---|---|---|
 | MAL Client-ID | *(required)* | Your MAL API application client-id |
 | Anime library paths | — | Library paths to treat as anime (selected via checkboxes) |
-| Sync schedule | Daily 03:00 | Daily at a fixed time, or every N minutes |
 | Min. title similarity | `0.60` | How strictly titles must match (0.0 – 1.0) |
 | Never downgrade | `true` | Don't overwrite a higher MAL progress with a lower one |
 | Mark Jellyfin from MAL | `false` | Also mark episodes played in Jellyfin if watched on MAL |

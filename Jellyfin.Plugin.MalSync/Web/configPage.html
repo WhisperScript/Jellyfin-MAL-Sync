@@ -133,36 +133,6 @@
         .ms-check-label { font-size: .9em; font-weight: 600; }
         .ms-check-sub   { font-size: .78em; opacity: .5; margin-top: .1em; }
 
-        /* ── Radio toggle ────────────────────────────────────────────────── */
-        .ms-radio-group {
-            display: flex;
-            gap: 0;
-            border-radius: 4px;
-            overflow: hidden;
-            border: 1px solid var(--divider-color, rgba(255,255,255,.15));
-            width: fit-content;
-            margin: .6em 0 .9em;
-        }
-        .ms-radio-group label {
-            display: flex;
-            align-items: center;
-            gap: .4em;
-            padding: .42em 1em;
-            cursor: pointer;
-            font-size: .85em;
-            transition: background .12s;
-            border-right: 1px solid var(--divider-color, rgba(255,255,255,.15));
-        }
-        .ms-radio-group label:last-child { border-right: none; }
-        .ms-radio-group input[type=radio] {
-            cursor: pointer;
-            accent-color: var(--accent-color, #00a4dc);
-        }
-        .ms-radio-group label:has(input:checked) {
-            background: rgba(0,164,220,.15);
-            color: var(--accent-color, #00a4dc);
-        }
-
         /* ── Log output ──────────────────────────────────────────────────── */
         .ms-log {
             background: rgba(0,0,0,.5);
@@ -255,49 +225,10 @@
             </span>
         </label>
 
-        <div style="margin-top:1.1em">
-            <label class="inputLabel" style="position:static;font-size:.82em;opacity:.6;display:block;margin-bottom:.3em">Automatic sync schedule</label>
-            <div class="ms-radio-group">
-                <label>
-                    <input type="radio" name="syncMode" id="syncModeDaily" value="daily" />
-                    Daily at fixed time
-                </label>
-                <label>
-                    <input type="radio" name="syncMode" id="syncModeInterval" value="interval" />
-                    Repeat every…
-                </label>
-            </div>
-
-            <div id="syncDailyFields" class="ms-two-col" style="max-width:22em">
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="cfgSyncHour">Hour (0–23)</label>
-                    <input id="cfgSyncHour" class="emby-input" type="number" min="0" max="23" step="1" value="3" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="cfgSyncMinute">Minute (0–59)</label>
-                    <input id="cfgSyncMinute" class="emby-input" type="number" min="0" max="59" step="1" value="0" />
-                </div>
-            </div>
-
-            <div id="syncIntervalFields" style="display:none;max-width:22em">
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="cfgSyncInterval">Interval</label>
-                    <select id="cfgSyncInterval" class="emby-select">
-                        <option value="15">Every 15 minutes</option>
-                        <option value="30">Every 30 minutes</option>
-                        <option value="60" selected>Every hour</option>
-                        <option value="120">Every 2 hours</option>
-                        <option value="240">Every 4 hours</option>
-                        <option value="360">Every 6 hours</option>
-                        <option value="720">Every 12 hours</option>
-                        <option value="1440">Every 24 hours</option>
-                        <option value="custom">Custom (minutes)…</option>
-                    </select>
-                    <input id="cfgSyncIntervalCustom" class="emby-input" type="number" min="5" max="10080" step="1"
-                           placeholder="Minutes (5 – 10080)" style="display:none;margin-top:.4em" />
-                </div>
-            </div>
-            <div class="ms-field-desc" style="margin-top:.3em">Changes apply immediately after saving — no restart needed.</div>
+        <div class="ms-hint" style="margin-top:1.1em">
+            Configure the automatic sync schedule via Jellyfin's built-in
+            <a href="scheduledtasks.html" target="_blank" rel="noopener noreferrer"
+               style="color:var(--accent-color,#00a4dc)">Scheduled Tasks</a>.
         </div>
 
         <div class="ms-btn-row">
@@ -430,18 +361,6 @@ window.MalSync = (function () {
         q('btnSync').addEventListener('click', function () { runSync(false); });
         q('btnDryRun').addEventListener('click', function () { runSync(true); });
 
-        // Schedule mode toggle
-        function onSyncModeChange() {
-            var isInterval = q('syncModeInterval').checked;
-            q('syncDailyFields').style.display    = isInterval ? 'none' : '';
-            q('syncIntervalFields').style.display = isInterval ? '' : 'none';
-        }
-        q('syncModeDaily').addEventListener('change', onSyncModeChange);
-        q('syncModeInterval').addEventListener('change', onSyncModeChange);
-        q('cfgSyncInterval').addEventListener('change', function () {
-            q('cfgSyncIntervalCustom').style.display = this.value === 'custom' ? '' : 'none';
-        });
-
         await Promise.allSettled([loadConfig(), refreshStatus()]);
     }
 
@@ -458,20 +377,6 @@ window.MalSync = (function () {
             q('cfgCacheTtl').value      = cfg.cacheTtlDays           ?? 30;
             q('cfgNoDowngrade').checked = cfg.malNoDowngrade         ?? true;
             q('cfgJfWatched').checked   = cfg.jfUpdateWatched        ?? false;
-            q('cfgSyncHour').value      = cfg.syncHour               ?? 3;
-            q('cfgSyncMinute').value    = cfg.syncMinute             ?? 0;
-
-            // Schedule mode
-            var useInterval = cfg.syncUseInterval ?? false;
-            q('syncModeInterval').checked = useInterval;
-            q('syncModeDaily').checked    = !useInterval;
-            q('syncDailyFields').style.display    = useInterval ? 'none' : '';
-            q('syncIntervalFields').style.display = useInterval ? '' : 'none';
-            var iv = cfg.syncIntervalMinutes ?? 60;
-            var sel = q('cfgSyncInterval');
-            var found = Array.from(sel.options).some(function (o) { return parseInt(o.value, 10) === iv; });
-            if (found) { sel.value = iv; } else { sel.value = 'custom'; q('cfgSyncIntervalCustom').style.display = ''; q('cfgSyncIntervalCustom').value = iv; }
-
             // Build library-path checkboxes
             const savedPaths = (cfg.animePaths ?? '').split(',').map(function (p) { return p.trim(); }).filter(Boolean);
             try {
@@ -522,12 +427,6 @@ window.MalSync = (function () {
                 cacheTtlDays:           parseInt(q('cfgCacheTtl').value, 10),
                 malNoDowngrade:         q('cfgNoDowngrade').checked,
                 jfUpdateWatched:        q('cfgJfWatched').checked,
-                syncHour:               parseInt(q('cfgSyncHour').value, 10),
-                syncMinute:             parseInt(q('cfgSyncMinute').value, 10),
-                syncUseInterval:        q('syncModeInterval').checked,
-                syncIntervalMinutes:    q('cfgSyncInterval').value === 'custom'
-                                          ? parseInt(q('cfgSyncIntervalCustom').value, 10)
-                                          : parseInt(q('cfgSyncInterval').value, 10),
             });
             status.textContent = '✔ Saved';
             status.style.color = '#74c69d';
