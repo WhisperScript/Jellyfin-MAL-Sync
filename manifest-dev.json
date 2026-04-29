@@ -1,0 +1,20 @@
+[
+  {
+    "name": "MAL Sync (Dev)",
+    "guid": "4a7b2c3d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+    "overview": "[DEV] Sync Jellyfin watch progress with MyAnimeList",
+    "description": "Development build. May be unstable.",
+    "owner": "Andrey-Saykin",
+    "category": "General",
+    "versions": [
+      {
+        "changelog": "",
+        "targetAbi": "10.11.0.0",
+        "version": "1.1.0",
+        "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/dev-task-as-cron-dashboard/Jellyfin.Plugin.MalSync_10.11.0.zip",
+        "checksum": "D7A6B0D85C5BC89D3129F0CF86C30957",
+        "timestamp": "2026-04-29T07:21:24"
+      }
+    ]
+  }
+]
