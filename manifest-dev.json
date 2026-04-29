@@ -12,8 +12,8 @@
         "targetAbi": "10.11.0.0",
         "version": "1.1.0",
         "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/dev-task-as-cron-dashboard/Jellyfin.Plugin.MalSync_10.11.0.zip",
-        "checksum": "EAB193BDDACA792886A89BD3CB403A4F",
-        "timestamp": "2026-04-29T07:06:01"
+        "checksum": "D7A6B0D85C5BC89D3129F0CF86C30957",
+        "timestamp": "2026-04-29T07:21:24"
       }
     ]
   }
