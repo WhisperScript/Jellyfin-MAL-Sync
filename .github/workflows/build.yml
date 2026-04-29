@@ -86,7 +86,7 @@ jobs:
               "guid": "4a7b2c3d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
               "overview": "[DEV] Sync Jellyfin watch progress with MyAnimeList",
               "description": "Development build. May be unstable.",
-              "owner": "Andrey-Saykin",
+              "owner": "WhisperScript",
               "category": "General",
               "versions": [
                 {
