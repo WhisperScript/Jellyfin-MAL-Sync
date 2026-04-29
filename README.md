@@ -54,7 +54,7 @@ sudo cp Jellyfin.Plugin.MalSync.dll "/your/jellyfin/data/plugins/MAL Sync_1.0.0.
 sudo docker restart jellyfin
 ```
 
-> **Requires:** Jellyfin 10.11+ and the [Plugin Pages](https://github.com/IAmParadox27/jellyfin-plugin-pages) plugin for the config UI to work.
+> **Requires:** Jellyfin 10.11+
 
 ### Build from source
 
