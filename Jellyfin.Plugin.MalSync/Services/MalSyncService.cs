@@ -78,6 +78,7 @@ public sealed class MalSyncService
         void Dbg(string msg) { _logger.LogDebug("{Msg}", msg); if (debug) { var line = "[DEBUG] " + msg; log.Add(line); onLog?.Invoke(line); } }
 
         var cfg = MalSyncPlugin.Instance!.Configuration;
+        var cacheScope = jellyfinUserId;
 
         // ── Resolve per-user settings (fall back to global) ───────────
         var userCfg = _auth.GetOrCreateUserConfig(jellyfinUserId);
@@ -115,7 +116,15 @@ public sealed class MalSyncService
         // ── Fetch MAL user list (paginated) ────────────────────────────
         Log("Fetching MAL user list…");
         var (malUserList, malTitleEntries) = await FetchMalUserListAsync(malHeaders, cancellationToken).ConfigureAwait(false);
+        var malAccountLabel = !string.IsNullOrWhiteSpace(userCfg.MalUsername) ? userCfg.MalUsername : jellyfinUserId;
+        Log($"[MAL] Account '{malAccountLabel}': {malUserList.Count} list entr{(malUserList.Count == 1 ? "y" : "ies")}");
         Dbg($"MAL user list loaded: {malUserList.Count} entries.");
+
+        if (malUserList.Count == 0)
+        {
+            Log("[SKIP] MAL list is empty for this account — nothing to sync.");
+            return log;
+        }
 
         // ── Filter anime series ────────────────────────────────────────
         var animePaths = cfg.GetAnimePaths();
@@ -150,7 +159,7 @@ public sealed class MalSyncService
                 // ── Resolve MAL ID ─────────────────────────────────────
                 string? malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList");
 
-                if (malId is null) malId = GetCachedMalId(seriesName, seasonNum, cfg.CacheTtlDays);
+                if (malId is null) malId = GetCachedMalId(cacheScope, seriesName, seasonNum, cfg.CacheTtlDays);
                 if (malId is not null && seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
 
                 if (malId is null)
@@ -159,7 +168,7 @@ public sealed class MalSyncService
                     if (malId is not null)
                     {
                         if (seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
-                        SetCachedMalId(seriesName, seasonNum, malId);
+                        SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
                     }
                 }
 
@@ -176,7 +185,7 @@ public sealed class MalSyncService
                         if (malId is not null)
                         {
                             s1IdCache.TryAdd(seriesId, malId);
-                            SetCachedMalId(seriesName, seasonNum, malId);
+                            SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
                         }
                     }
                     else
@@ -199,7 +208,7 @@ public sealed class MalSyncService
                             Dbg($"Sequel chain failed, direct search for '{seriesName} {suffix}'…");
                             malId = await SearchMalIdAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
                         }
-                        if (malId is not null) SetCachedMalId(seriesName, seasonNum, malId);
+                        if (malId is not null) SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
                     }
                 }
 
@@ -273,7 +282,8 @@ public sealed class MalSyncService
                 }
                 else
                 {
-                    if (_syncState.TryGetValue(malId, out var last)
+                    var syncStateKey = $"{cacheScope}::{malId}";
+                    if (_syncState.TryGetValue(syncStateKey, out var last)
                         && last.WatchedCount == watchedCount && last.Status == status)
                     {
                         Dbg($"  → '{label}': no change since last run, skipping.");
@@ -308,7 +318,7 @@ public sealed class MalSyncService
                     if (resp.IsSuccessStatusCode)
                     {
                         Log($"[MAL] {label}: {watchedCount}/{(malTotal > 0 ? malTotal : "?")} eps ({status})");
-                        _syncState[malId] = new SyncState(watchedCount, status);
+                        _syncState[$"{cacheScope}::{malId}"] = new SyncState(watchedCount, status);
                     }
                     else
                     {
@@ -638,16 +648,16 @@ public sealed class MalSyncService
     // MAL-ID CACHE (in-memory for session; can be persisted via plugin storage)
     // ═════════════════════════════════════════════════════════════════════
 
-    private string? GetCachedMalId(string series, int season, int ttlDays)
+    private string? GetCachedMalId(string userScope, string series, int season, int ttlDays)
     {
-        var key = $"{series}::{season}";
+        var key = $"{userScope}::{series}::{season}";
         if (!_malIdCache.TryGetValue(key, out var entry)) return null;
         if ((DateTime.UtcNow - entry.CachedAt).TotalDays > ttlDays) { _malIdCache.Remove(key); return null; }
         return entry.MalId;
     }
 
-    private void SetCachedMalId(string series, int season, string malId)
-        => _malIdCache[$"{series}::{season}"] = new CacheEntry(malId, DateTime.UtcNow);
+    private void SetCachedMalId(string userScope, string series, int season, string malId)
+        => _malIdCache[$"{userScope}::{series}::{season}"] = new CacheEntry(malId, DateTime.UtcNow);
 
     // ═════════════════════════════════════════════════════════════════════
     // STRING / TITLE HELPERS  (mirrors the Python script)

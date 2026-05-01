@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using Jellyfin.Plugin.MalSync.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +18,9 @@ public sealed class JellyseerrImportService
     private readonly IHttpClientFactory _httpFactory;
     private readonly MalAuthService _auth;
     private readonly ILogger<JellyseerrImportService> _logger;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _importGates = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, DateTime> _recentSubmitted = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan _recentSubmittedTtl = TimeSpan.FromMinutes(30);
 
     public JellyseerrImportService(
         IHttpClientFactory httpFactory,
@@ -41,18 +45,58 @@ public sealed class JellyseerrImportService
         var log = new List<string>();
         void Log(string msg) { log.Add(msg); _logger.LogInformation("{Msg}", msg); onLog?.Invoke(msg); }
 
-        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var gate = _importGates.GetOrAdd(jellyfinUserId, static _ => new SemaphoreSlim(1, 1));
+        if (!await gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            Log("[SKIP] Import already running for this user (manual/cron overlap). Try again in a few seconds.");
+            return log;
+        }
 
-        // ── Resolve per-user URL / key (fall back to global) ──────────────
+        try
+        {
+        var nowUtc = DateTime.UtcNow;
+        foreach (var kv in _recentSubmitted)
+        {
+            if (nowUtc - kv.Value > _recentSubmittedTtl)
+                _recentSubmitted.TryRemove(kv.Key, out _);
+        }
+
+        static string ScopeRecentKey(string userId, string key) => $"{userId}::{key}";
+        bool HasRecentExact(string key)
+        {
+            var scoped = ScopeRecentKey(jellyfinUserId, key);
+            return _recentSubmitted.TryGetValue(scoped, out var t)
+                && nowUtc - t <= _recentSubmittedTtl;
+        }
+        bool HasRecentTvAnySeason(int tmdbId)
+        {
+            var prefix = $"{jellyfinUserId}::tv:{tmdbId}:";
+            foreach (var kv in _recentSubmitted)
+            {
+                if (kv.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && nowUtc - kv.Value <= _recentSubmittedTtl)
+                    return true;
+            }
+
+            return false;
+        }
+        void MarkRecent(string key)
+        {
+            var scoped = ScopeRecentKey(jellyfinUserId, key);
+            _recentSubmitted[scoped] = DateTime.UtcNow;
+        }
+
+
+        var cfg = MalSyncPlugin.Instance!.Configuration;
         var userCfg = _auth.GetOrCreateUserConfig(jellyfinUserId);
-        var effectiveUrl    = (userCfg.JellyseerrUrl?.Trim().TrimEnd('/') is { Length: > 0 } u)
-                              ? u : cfg.JellyseerrUrl.TrimEnd('/');
-        var effectiveApiKey = (userCfg.JellyseerrApiKey?.Trim() is { Length: > 0 } k)
-                              ? k : cfg.JellyseerrApiKey;
+
+        // ── Resolve global Jellyseerr URL / key ───────────────────────────
+        var effectiveUrl = cfg.JellyseerrUrl.Trim().TrimEnd('/');
+        var effectiveApiKey = cfg.JellyseerrApiKey.Trim();
 
         if (string.IsNullOrWhiteSpace(effectiveUrl) || string.IsNullOrWhiteSpace(effectiveApiKey))
         {
-            Log("[ERROR] Jellyseerr URL or API key is not configured (neither globally nor per-user).");
+            Log("[ERROR] Jellyseerr URL or API key is not configured in admin settings.");
             return log;
         }
 
@@ -74,10 +118,10 @@ public sealed class JellyseerrImportService
             return log;
         }
 
-        var profiles = cfg.JellyseerrProfiles;
+        var profiles = userCfg.JellyseerrProfiles;
         if (profiles.Count == 0)
         {
-            Log("[ERROR] No import profiles configured. Add at least one profile in Admin → MAL Sync → Import tab.");
+            Log("[ERROR] No import profiles configured for this user. Add at least one profile on your MAL Sync account page.");
             return log;
         }
 
@@ -117,9 +161,14 @@ public sealed class JellyseerrImportService
         var jellyseerrUserId = await GetJellyseerrUserIdAsync(
             effectiveUrl, effectiveApiKey, jellyfinUserId, cancellationToken).ConfigureAwait(false);
         if (jellyseerrUserId is not null)
+        {
             _logger.LogInformation("Jellyseerr user ID resolved: {Id}", jellyseerrUserId);
+        }
         else
-            _logger.LogWarning("Could not resolve Jellyseerr user ID for Jellyfin user {UserId} — override rules may not apply.", jellyfinUserId);
+        {
+            Log($"[ERROR] Jellyseerr user for Jellyfin account '{jellyfinUserId}' not found or not yet logged in. Create an account in Jellyseerr first, then link it via Jellyseerr settings → Users.");
+            return log;
+        }
 
         // ── Fetch all series tracked by Sonarr (via Jellyseerr settings) ──
         Log("Fetching Sonarr tracked series…");
@@ -133,11 +182,11 @@ public sealed class JellyseerrImportService
             _logger.LogInformation("Anime routing: serverId={ServerId} profileId={Profile} rootFolder={Folder}",
                 sonarrServerId, animeProfileId, animeDirectory);
 
-        // ── Fetch existing Jellyseerr media (requests + scanned items) ────
-        Log("Fetching existing Jellyseerr media…");
+        // ── Fetch existing Jellyseerr requests (pending/approved/declined) ──
+        Log("Fetching existing Jellyseerr requests…");
         var existingRequests = await FetchExistingJellyseerrRequestsAsync(
             effectiveUrl, effectiveApiKey, cancellationToken).ConfigureAwait(false);
-        Log($"Jellyseerr is tracking {existingRequests.Count / 2} media item(s).");
+        Log($"Jellyseerr request cache: {existingRequests.Count} tracked request key(s) (including pending/declined requests).");
 
         // ── Pre-fetch all MAL details in parallel (rate-limited to 3 concurrent) ──
         Log($"Pre-fetching MAL details for {toRequest.Count} entries…");
@@ -168,7 +217,7 @@ public sealed class JellyseerrImportService
             var malId     = entry.Node.Id.ToString();
             var title     = entry.Node.Title ?? malId;
             var malStatus = entry.ListStatus?.Status ?? "unknown";
-            var profile   = statusMap[malStatus];
+            var profile = statusMap[malStatus];
 
             _logger.LogInformation("[PROCESS] Processing MAL entry {Id} '{Title}' (status: {Status})", malId, title, malStatus);
 
@@ -208,8 +257,7 @@ public sealed class JellyseerrImportService
             }
 
             // ── Determine season number ────────────────────────────────────
-            string requestKey;
-            int    seasonNumber = 1;
+            int seasonNumber = 1;
 
             // ── Fetch TV detail early — needed for season-name matching and Sonarr dedup ──
             if (!tvDetailCache.TryGetValue(searchResult.Id, out var tvDetail))
@@ -247,14 +295,13 @@ public sealed class JellyseerrImportService
                     }
                 }
 
-                requestKey = profile.RequestAllSeasons
-                    ? $"tv:{searchResult.Id}:all"
-                    : $"tv:{searchResult.Id}:s{seasonNumber}";
             }
-            else
-            {
-                requestKey = $"movie:{searchResult.Id}";
-            }
+
+            var requestAllSeasons = profile.RequestAllSeasons;
+
+            var importKey = string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase)
+                ? (requestAllSeasons ? $"tv:{searchResult.Id}:all" : $"tv:{searchResult.Id}:s{seasonNumber}")
+                : $"movie:{searchResult.Id}";
 
             if (sonarrTracked is not null)
             {
@@ -266,7 +313,7 @@ public sealed class JellyseerrImportService
                     //          OR requesting a specific season that already exists in Sonarr
                     //          (regardless of whether that season is monitored or not —
                     //           submitting a duplicate request causes Sonarr to re-scan)
-                    bool inSonarr = profile.RequestAllSeasons
+                    bool inSonarr = requestAllSeasons
                         ? trackedSeasons.Count > 0
                         : trackedSeasons.Contains(seasonNumber);
 
@@ -307,7 +354,7 @@ public sealed class JellyseerrImportService
                 {
                     alreadyTracked = searchResult.MediaInfo.Status >= 2;
                 }
-                else if (profile.RequestAllSeasons)
+                else if (requestAllSeasons)
                 {
                     alreadyTracked = searchResult.MediaInfo.Status >= 5;
                 }
@@ -329,14 +376,36 @@ public sealed class JellyseerrImportService
             // ── Belt-and-suspenders: Jellyseerr media page cache ──────────
             // Skip entirely when Sonarr has confirmed the show is absent — stale Jellyseerr
             // cache entries (requests or media rows) must not override Sonarr's ground truth.
-            if (!confirmedAbsentFromSonarr && existingRequests.Contains(requestKey))
+            //
+            // CRITICAL: For TV shows, check if ANY request for this TMDB ID exists in Jellyseerr,
+            // not just the specific season. If any request exists, it likely means the show was already
+            // requested in another season, or a previous request is still pending/declined. Better to
+            // skip than to spam duplicate requests for different seasons of the same show.
+            bool hasExistingRequest = false;
+            if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
             {
-                Log($"[SKIP] '{title}' S{seasonNumber} — request key '{requestKey}' already in Jellyseerr request cache.");
+                // Check if TV show exists in any form (all seasons or specific season)
+                hasExistingRequest = existingRequests.Contains($"tv:{searchResult.Id}:all")
+                                  || existingRequests.Any(k => k.StartsWith($"tv:{searchResult.Id}:s", StringComparison.OrdinalIgnoreCase))
+                                  || HasRecentTvAnySeason(searchResult.Id);
+            }
+            else
+            {
+                // For movies, exact match only
+                hasExistingRequest = existingRequests.Contains(importKey) || HasRecentExact(importKey);
+            }
+
+            // IMPORTANT: existing Jellyseerr requests must ALWAYS block re-submission,
+            // even when the show is currently absent from Sonarr. Otherwise pending or
+            // declined requests will be re-created on every manual/cron run.
+            if (hasExistingRequest)
+            {
+                Log($"[SKIP] '{title}' → request(s) for this title already exist in Jellyseerr (may be pending, approved, or declined).");
                 skipped++;
                 continue;
             }
 
-            string seasonDesc = profile.RequestAllSeasons ? "all seasons" : $"S{seasonNumber}";
+            string seasonDesc = requestAllSeasons ? "all seasons" : $"S{seasonNumber}";
 
             Log($"[REQUEST] '{title}' (MAL {malId}) → TMDB {searchResult.Id} {seasonDesc} [{malStatus}] [{profile.Name}]");
 
@@ -344,7 +413,7 @@ public sealed class JellyseerrImportService
             {
                 // For RequestAllSeasons, pass the season list from the already-cached tv detail lookup
                 List<int>? explicitSeasons = null;
-                if (profile.RequestAllSeasons && tvDetail.Seasons.Count > 0)
+                if (requestAllSeasons && tvDetail.Seasons.Count > 0)
                     explicitSeasons = tvDetail.Seasons;
 
                 // Explicit anime routing is only used as a FALLBACK when we could not resolve a
@@ -378,7 +447,15 @@ public sealed class JellyseerrImportService
                     explicitServerId, explicitProfileId, explicitRootFolder, explicitTags,
                     title, cancellationToken).ConfigureAwait(false);
 
-                if (ok) submitted++;
+                if (ok)
+                {
+                    submitted++;
+                    // Update local cache so duplicate submissions within the same run are caught
+                    existingRequests.Add(importKey);
+                    MarkRecent(importKey);
+                    if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
+                        MarkRecent($"tv:{searchResult.Id}:all");
+                }
                 else { Log($"[ERROR] Failed to submit Jellyseerr request for '{title}'."); failed++; }
             }
             else
@@ -390,6 +467,11 @@ public sealed class JellyseerrImportService
         var verb = dryRun ? "would be submitted" : "submitted";
         Log($"Import complete. {submitted} request(s) {verb}, {skipped} skipped, {failed} failed.");
         return log;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -740,68 +822,28 @@ public sealed class JellyseerrImportService
         var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            // ── 1) /api/v1/media — items already in Sonarr/Radarr (scanned + downloaded) ──
-            // NOTE: this endpoint returns seasons=[] for TV items, so it only gives us
-            // whole-show keys (used by RequestAllSeasons mode). Per-season keys come from step 2.
-            int skip = 0, total = int.MaxValue;
-            while (skip < total)
+            // We intentionally dedup against /api/v1/request (NOT /api/v1/media) because
+            // request rows are the authoritative source for pending/approved/declined items.
+            // This prevents repeated submissions when requests are still open or declined.
+            int reqSkip = 0;
+            const int pageSize = 100;
+
+            while (true)
             {
                 using var http = CreateJellyseerrClient(baseUrl, apiKey);
                 var resp = await http.GetAsync(
-                    $"/api/v1/media?take=100&skip={skip}&filter=all&sort=added",
+                    $"/api/v1/request?take={pageSize}&skip={reqSkip}&filter=all&sort=added",
                     ct).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode) break;
-
-                var result = await resp.Content.ReadFromJsonAsync<JellyseerrMediaPage>(
-                    cancellationToken: ct).ConfigureAwait(false);
-                if (result?.Results is null || result.Results.Count == 0) break;
-
-                total = result.PageInfo?.Results ?? result.Results.Count;
-
-                foreach (var media in result.Results)
+                if (!resp.IsSuccessStatusCode)
                 {
-                    // status 1 = Unknown (not yet in Sonarr) — don't skip these
-                    if (media.Status < 2) continue;
-
-                    var tmdbId = media.TmdbId;
-                    if (tmdbId is null or 0) continue;
-
-                    if (string.Equals(media.MediaType, "movie", StringComparison.OrdinalIgnoreCase))
-                    {
-                        keys.Add($"movie:{tmdbId}");
-                    }
-                    else
-                    {
-                        // Add a per-show key so RequestAllSeasons can dedup by show
-                        keys.Add($"tv:{tmdbId}:all");
-                        // Add per-season keys if the API happens to return them
-                        foreach (var s in media.Seasons ?? [])
-                            if (s.Status >= 2)
-                                keys.Add($"tv:{tmdbId}:s{s.SeasonNumber}");
-                    }
+                    _logger.LogWarning("Could not fetch Jellyseerr requests: HTTP {Status}", (int)resp.StatusCode);
+                    break;
                 }
-
-                skip += result.Results.Count;
-                if (result.Results.Count < 100) break;
-            }
-
-            // ── 2) /api/v1/request — pending requests with exact per-season data ──
-            // The media API returns seasons=[] so per-season keys must come from the request API.
-            // This ensures re-runs don't re-submit requests that are still pending in Jellyseerr.
-            int reqSkip = 0, reqTotal = int.MaxValue;
-            while (reqSkip < reqTotal)
-            {
-                using var http = CreateJellyseerrClient(baseUrl, apiKey);
-                var resp = await http.GetAsync(
-                    $"/api/v1/request?take=100&skip={reqSkip}&filter=all&sort=added",
-                    ct).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode) break;
 
                 var page = await resp.Content.ReadFromJsonAsync<JellyseerrRequestPage>(
                     cancellationToken: ct).ConfigureAwait(false);
-                if (page?.Results is null || page.Results.Count == 0) break;
-
-                reqTotal = page.PageInfo?.Results ?? page.Results.Count;
+                if (page?.Results is null || page.Results.Count == 0)
+                    break;
 
                 foreach (var req in page.Results)
                 {
@@ -812,25 +854,30 @@ public sealed class JellyseerrImportService
                     if (string.Equals(mediaType, "movie", StringComparison.OrdinalIgnoreCase))
                     {
                         keys.Add($"movie:{tmdbId}");
+                        continue;
+                    }
+
+                    if (req.Seasons is { Count: > 0 })
+                    {
+                        foreach (var s in req.Seasons)
+                            keys.Add($"tv:{tmdbId}:s{s.SeasonNumber}");
                     }
                     else
                     {
-                        if (req.Seasons is { Count: > 0 })
-                            foreach (var s in req.Seasons)
-                                keys.Add($"tv:{tmdbId}:s{s.SeasonNumber}");
-                        else
-                            keys.Add($"tv:{tmdbId}:all");
+                        keys.Add($"tv:{tmdbId}:all");
                     }
                 }
 
                 reqSkip += page.Results.Count;
-                if (page.Results.Count < 100) break;
+                if (page.Results.Count < pageSize)
+                    break;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not fetch existing Jellyseerr media.");
+            _logger.LogWarning(ex, "Could not fetch existing Jellyseerr requests.");
         }
+
         return keys;
     }
 
@@ -891,6 +938,15 @@ public sealed class JellyseerrImportService
                     "Jellyseerr request created for '{Title}' (TMDB {Id}) — response: {Body}",
                     title, tmdbId, responseBody);
                 return true;
+            }
+
+            // Treat HTTP 400 as likely a duplicate request or validation error from Jellyseerr
+            if ((int)resp.StatusCode == 400)
+            {
+                _logger.LogDebug(
+                    "Jellyseerr returned HTTP 400 for '{Title}' (possible duplicate): {Body}",
+                    title, responseBody);
+                return false; // Treat as failed, but don't log as warning (expected for duplicates)
             }
 
             _logger.LogWarning(

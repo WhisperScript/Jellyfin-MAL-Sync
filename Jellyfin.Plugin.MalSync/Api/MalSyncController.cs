@@ -149,7 +149,6 @@ public sealed class MalSyncController : ControllerBase
             syncIntervalMinutes = cfg.SyncIntervalMinutes,
             jellyseerrUrl = cfg.JellyseerrUrl,
             jellyseerrApiKey = cfg.JellyseerrApiKey,
-            jellyseerrProfiles = cfg.JellyseerrProfiles,
         });
     }
 
@@ -185,8 +184,6 @@ public sealed class MalSyncController : ControllerBase
             cfg.JellyseerrUrl = body.JellyseerrUrl.Trim().TrimEnd('/');
         if (body.JellyseerrApiKey is not null)
             cfg.JellyseerrApiKey = body.JellyseerrApiKey.Trim();
-        if (body.JellyseerrProfiles is not null)
-            cfg.JellyseerrProfiles = body.JellyseerrProfiles;
 
         MalSyncPlugin.Instance.SaveConfiguration();
 
@@ -294,11 +291,7 @@ public sealed class MalSyncController : ControllerBase
             // Indicate whether the value is a personal override or the global default
             noDowngradeIsPersonal = uc.NoDowngrade.HasValue,
             jfUpdateWatchedIsPersonal = uc.JfUpdateWatched.HasValue,
-            // Jellyseerr – return per-user override (may be null/empty = using global)
-            jellyseerrUrl = uc.JellyseerrUrl ?? string.Empty,
-            jellyseerrApiKey = uc.JellyseerrApiKey ?? string.Empty,
-            // Whether a global Jellyseerr URL is configured (so the UI can show a fallback hint)
-            globalJellyseerrConfigured = !string.IsNullOrWhiteSpace(cfg.JellyseerrUrl),
+            jellyseerrProfiles = uc.JellyseerrProfiles,
         });
     }
 
@@ -311,15 +304,27 @@ public sealed class MalSyncController : ControllerBase
         var userId = GetUserId();
         var uc = _auth.GetOrCreateUserConfig(userId);
 
-        // null in the request means "reset to global default"
-        uc.NoDowngrade = body.NoDowngrade;
-        uc.JfUpdateWatched = body.JfUpdateWatched;
-
-        // Empty string means "use global default"; non-empty = personal override
-        if (body.JellyseerrUrl is not null)
-            uc.JellyseerrUrl = string.IsNullOrWhiteSpace(body.JellyseerrUrl) ? null : body.JellyseerrUrl.Trim().TrimEnd('/');
-        if (body.JellyseerrApiKey is not null)
-            uc.JellyseerrApiKey = string.IsNullOrWhiteSpace(body.JellyseerrApiKey) ? null : body.JellyseerrApiKey.Trim();
+        if (body.NoDowngrade.HasValue)
+            uc.NoDowngrade = body.NoDowngrade.Value;
+        if (body.JfUpdateWatched.HasValue)
+            uc.JfUpdateWatched = body.JfUpdateWatched.Value;
+        if (body.JellyseerrProfiles is not null)
+        {
+            uc.JellyseerrProfiles = body.JellyseerrProfiles
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => new Configuration.JellyseerrImportProfile
+                {
+                    Id = string.IsNullOrWhiteSpace(p.Id) ? Guid.NewGuid().ToString("N")[..8] : p.Id,
+                    Name = p.Name.Trim(),
+                    Statuses = p.Statuses
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Select(s => s.Trim().ToLowerInvariant())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    RequestAllSeasons = p.RequestAllSeasons,
+                })
+                .ToList();
+        }
 
         MalSyncPlugin.Instance!.SaveConfiguration();
         return Ok(new { message = "Personal settings saved." });
@@ -432,14 +437,12 @@ public sealed class MalSyncController : ControllerBase
         public int? SyncIntervalMinutes { get; set; }
         public string? JellyseerrUrl { get; set; }
         public string? JellyseerrApiKey { get; set; }
-        public List<Configuration.JellyseerrImportProfile>? JellyseerrProfiles { get; set; }
     }
 
     public sealed class UserConfigRequest
     {
         public bool? NoDowngrade { get; set; }
         public bool? JfUpdateWatched { get; set; }
-        public string? JellyseerrUrl { get; set; }
-        public string? JellyseerrApiKey { get; set; }
+        public List<Configuration.JellyseerrImportProfile>? JellyseerrProfiles { get; set; }
     }
 }

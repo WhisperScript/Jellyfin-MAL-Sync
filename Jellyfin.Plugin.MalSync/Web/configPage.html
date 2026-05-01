@@ -135,6 +135,49 @@
         .ms-log .log-err  { color: #ff6b6b; }
         .ms-log .log-dbg  { color: rgba(160,180,200,.38); font-size: .9em; }
 
+        .ms-log-line {
+            display: grid;
+            grid-template-columns: auto auto 1fr;
+            align-items: start;
+            gap: .55em;
+            margin: 0;
+            padding: .14em 0;
+            line-height: 1.45;
+        }
+        .ms-log-time {
+            opacity: .55;
+            font-size: .72em;
+            white-space: nowrap;
+            letter-spacing: .02em;
+            min-width: 4.8em;
+            text-align: right;
+        }
+        .ms-log-badge {
+            font-size: .66em;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: .02em .45em;
+            line-height: 1.45;
+            white-space: nowrap;
+            border: 1px solid transparent;
+            min-width: 2.6em;
+            text-align: center;
+        }
+        .ms-log-msg {
+            min-width: 0;
+            word-break: break-word;
+            white-space: pre-wrap;
+            font-size: .98em;
+        }
+
+        .ms-log-line.log-info .ms-log-badge { color: #78c8d8; border-color: rgba(120,200,216,.45); background: rgba(120,200,216,.14); }
+        .ms-log-line.log-ok   .ms-log-badge { color: #5de0a0; border-color: rgba(93,224,160,.45); background: rgba(93,224,160,.14); }
+        .ms-log-line.log-warn .ms-log-badge { color: #ffd166; border-color: rgba(255,209,102,.45); background: rgba(255,209,102,.14); }
+        .ms-log-line.log-err  .ms-log-badge { color: #ff6b6b; border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.14); }
+        .ms-log-line.log-dbg  .ms-log-badge { color: rgba(160,180,200,.9); border-color: rgba(160,180,200,.35); background: rgba(160,180,200,.12); }
+
         .ms-spinner {
             display: none;
             width: 1em; height: 1em;
@@ -300,7 +343,6 @@
 
             <div class="ms-hint">
                 Server-wide Jellyseerr credentials used for all imports.
-                Each user can override URL and API key on their own MAL Sync page.
             </div>
 
             <div class="ms-two-col" style="margin-top:.9em">
@@ -324,14 +366,12 @@
             </div>
         </div>
 
-        <!-- Import Profiles -->
         <div class="ms-card">
-            <p class="ms-card-title">Import Profiles</p>
+            <p id="cfgImportProfilesTitle" class="ms-card-title">My Import Profiles</p>
 
             <div class="ms-hint">
-                Each profile maps one or more MAL statuses to specific Sonarr settings in Jellyseerr —
-                similar to Sonarr's Import Lists. When the import runs, each matching anime is requested
-                using its profile's root folder and quality profile.
+                These profiles are user-specific for the currently logged-in account.
+                Scheduled import also runs per user and uses each user's own profiles.
             </div>
 
             <div id="cfgProfileList" style="margin-top:.8em"></div>
@@ -343,14 +383,12 @@
                 <button id="btnAddProfile" type="button" class="ms-btn">+ Add Profile</button>
             </div>
 
-            <!-- ── Profile editor (inline) ───────────────────────────────── -->
             <div id="cfgProfileEditor" class="ms-editor-section ms-hidden">
                 <p id="pf-editorTitle" style="font-weight:600;font-size:.95em;margin:0 0 1em">Add Profile</p>
 
                 <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="pf-name">Profile Name</label>
-                    <input id="pf-name" class="emby-input" type="text"
-                           placeholder="e.g. Plan to Watch" />
+                    <input id="pf-name" class="emby-input" type="text" placeholder="e.g. Plan to Watch" />
                 </div>
 
                 <div style="margin:.9em 0">
@@ -371,27 +409,23 @@
                         Which seasons to request in Jellyseerr
                     </label>
                     <div style="display:flex;flex-direction:column;gap:.45em">
-                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s"
-                               id="pf-season-specific-label">
+                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s">
                             <input type="radio" name="pf-season-mode" id="pf-season-specific" value="specific"
                                    style="margin-top:.2em;flex-shrink:0;accent-color:var(--accent-color,#00a4dc)" />
                             <span>
                                 <div style="font-weight:600;font-size:.9em">Only this season</div>
                                 <div style="font-size:.78em;opacity:.5;margin-top:.1em">
-                                    Requests only the season matching the MAL entry
-                                    (e.g. Attack on Titan S2 on MAL → request S2 in Jellyseerr)
+                                    Requests only the season matching the MAL entry.
                                 </div>
                             </span>
                         </label>
-                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s"
-                               id="pf-season-all-label">
+                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s">
                             <input type="radio" name="pf-season-mode" id="pf-season-all" value="all"
                                    style="margin-top:.2em;flex-shrink:0;accent-color:var(--accent-color,#00a4dc)" />
                             <span>
                                 <div style="font-weight:600;font-size:.9em">All seasons</div>
                                 <div style="font-size:.78em;opacity:.5;margin-top:.1em">
-                                    Requests every season of the series
-                                    (e.g. Attack on Titan on MAL → request S1, S2, S3, … in Jellyseerr)
+                                    Requests every season of the series for this profile.
                                 </div>
                             </span>
                         </label>
@@ -399,21 +433,19 @@
                 </div>
 
                 <div class="ms-btn-row">
-                    <button id="btnSaveProfile"   type="button" class="ms-btn ms-btn-primary">Save Profile</button>
+                    <button id="btnSaveProfile" type="button" class="ms-btn ms-btn-primary">Save Profile</button>
                     <button id="btnCancelProfile" type="button" class="ms-btn">Cancel</button>
                     <span id="pf-saveStatus" class="ms-save-status"></span>
                 </div>
             </div>
         </div>
 
-        <!-- MAL → Jellyseerr Import -->
         <div class="ms-card">
-            <p class="ms-card-title">MAL → Jellyseerr Import</p>
+            <p id="cfgImportRunTitle" class="ms-card-title">MAL → Jellyseerr Import</p>
 
             <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
-                Reads your MAL list and submits Jellyseerr requests for every matching entry.
-                The scheduled task <em>Dashboard → Scheduled Tasks → "Import MAL list to Jellyseerr"</em>
-                runs for all authenticated users.
+                Runs import for the currently logged-in admin user using that user's own profiles.
+                Use this for testing your personal profile setup.
             </p>
 
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
@@ -550,23 +582,47 @@ async function jfPost(path, data) {
 // ── Page module ───────────────────────────────────────────────────────────────
 window.MalSync = (function () {
     let _initialized = false;
-    let _profiles    = [];
-    let _editingId   = null; // null = new, string = editing existing
+    let _profiles = [];
+    let _editingId = null;
 
     function q(id) { return document.getElementById(id); }
 
     function logLine(container, text) {
-        const t   = text ?? '';
-        const cls = (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) ? 'log-err'
-                  : t.startsWith('[DRY RUN]')                                 ? 'log-warn'
-                  : t.startsWith('[MAL]')                                     ? 'log-ok'
-                  : t.startsWith('[DEBUG]') || t.startsWith('[DBG]')          ? 'log-dbg'
-                  : 'log-info';
-        const div = document.createElement('div');
-        div.className   = cls;
-        div.textContent = t;
-        container.appendChild(div);
+        const t = text ?? '';
+        const info = classifyLogLine(t);
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+        const row = document.createElement('div');
+        row.className = 'ms-log-line ' + info.cls;
+
+        const tEl = document.createElement('span');
+        tEl.className = 'ms-log-time';
+        tEl.textContent = time;
+
+        const bEl = document.createElement('span');
+        bEl.className = 'ms-log-badge';
+        bEl.textContent = info.badge;
+
+        const msg = document.createElement('span');
+        msg.className = 'ms-log-msg';
+        msg.textContent = t;
+
+        row.appendChild(tEl);
+        row.appendChild(bEl);
+        row.appendChild(msg);
+        container.appendChild(row);
         container.scrollTop = container.scrollHeight;
+    }
+
+    function classifyLogLine(t) {
+        if (t.startsWith('[REQUEST]')) return { cls: 'log-ok', badge: 'REQ' };
+        if (t.startsWith('[SKIP]')) return { cls: 'log-warn', badge: 'SKIP' };
+        if (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) return { cls: 'log-err', badge: 'ERR' };
+        if (t.startsWith('[DRY RUN]')) return { cls: 'log-warn', badge: 'DRY' };
+        if (t.startsWith('[MAL]')) return { cls: 'log-ok', badge: 'MAL' };
+        if (t.startsWith('[DEBUG]') || t.startsWith('[DBG]')) return { cls: 'log-dbg', badge: 'DBG' };
+        if (t.startsWith('Sync complete.') || t.startsWith('Import complete.')) return { cls: 'log-ok', badge: 'DONE' };
+        return { cls: 'log-info', badge: 'INFO' };
     }
 
     // ── Tab switching ─────────────────────────────────────────────────────
@@ -607,16 +663,15 @@ window.MalSync = (function () {
         q('btnSaveProfile').addEventListener('click', saveProfile);
         q('btnCancelProfile').addEventListener('click', cancelProfileForm);
 
-        // Event delegation for profile list Edit / Delete buttons
         q('cfgProfileList').addEventListener('click', function (e) {
             var btn = e.target.closest('button');
             if (!btn) return;
             var id = btn.dataset.profileId;
             if (btn.classList.contains('ms-btn-edit')) openProfileForm(id);
-            if (btn.classList.contains('ms-btn-del'))  deleteProfile(id);
+            if (btn.classList.contains('ms-btn-del')) deleteProfile(id);
         });
 
-        await Promise.allSettled([loadConfig(), refreshStatus(), loadAccountTitle()]);
+        await Promise.allSettled([loadConfig(), loadUserImportConfig(), refreshStatus(), loadAccountTitle()]);
     }
 
     // ── account card title ────────────────────────────────────────────────
@@ -624,7 +679,13 @@ window.MalSync = (function () {
         try {
             const me = await jfGet('/Users/Me');
             const name = me.Name || me.name;
-            if (name) q('malAccountTitle').textContent = name + '\u2019s MyAnimeList Account';
+            if (name) {
+                q('malAccountTitle').textContent = name + '\u2019s MyAnimeList Account';
+                var pTitle = q('cfgImportProfilesTitle');
+                var iTitle = q('cfgImportRunTitle');
+                if (pTitle) pTitle.textContent = name + '\u2019s Import Profiles';
+                if (iTitle) iTitle.textContent = name + '\u2019s MAL → Jellyseerr Import';
+            }
         } catch (_) { /* non-fatal */ }
     }
 
@@ -641,11 +702,8 @@ window.MalSync = (function () {
             q('cfgCacheTtl').value      = cfg.cacheTtlDays           ?? 30;
             q('cfgNoDowngrade').checked = cfg.malNoDowngrade         ?? true;
             q('cfgJfWatched').checked   = cfg.jfUpdateWatched        ?? false;
-            q('cfgJellyseerrUrl').value    = cfg.jellyseerrUrl    ?? '';
-            q('cfgJellyseerrApiKey').value = cfg.jellyseerrApiKey ?? '';
-
-            _profiles = cfg.jellyseerrProfiles ?? [];
-            renderProfileList();
+            q('cfgJellyseerrUrl').value       = cfg.jellyseerrUrl            ?? '';
+            q('cfgJellyseerrApiKey').value    = cfg.jellyseerrApiKey         ?? '';
 
             // Library-path checkboxes
             const savedPaths = (cfg.animePaths ?? '').split(',')
@@ -724,10 +782,20 @@ window.MalSync = (function () {
         setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
     }
 
-    // ── Import Profiles ───────────────────────────────────────────────────
+    async function loadUserImportConfig() {
+        try {
+            const cfg = await jfGet('/MalSync/user/config');
+            _profiles = cfg.jellyseerrProfiles ?? [];
+            renderProfileList();
+        } catch (_) {
+            _profiles = [];
+            renderProfileList();
+        }
+    }
+
     function renderProfileList() {
-        const list  = q('cfgProfileList');
-        const empty = q('cfgProfileEmpty');
+        var list = q('cfgProfileList');
+        var empty = q('cfgProfileEmpty');
         list.innerHTML = '';
 
         if (!_profiles.length) {
@@ -737,13 +805,12 @@ window.MalSync = (function () {
         empty.classList.add('ms-hidden');
 
         _profiles.forEach(function (p) {
-            const tags = (p.statuses || []).map(function (s) {
+            var tags = (p.statuses || []).map(function (s) {
                 return '<span class="ms-tag">' + s.replace(/_/g, ' ') + '</span>';
             }).join('');
 
-            const seasonLabel = p.requestAllSeasons ? 'All seasons' : 'Specific season';
-
-            const row = document.createElement('div');
+            var seasonLabel = p.requestAllSeasons ? 'All seasons' : 'Specific season';
+            var row = document.createElement('div');
             row.className = 'ms-profile-row';
             row.innerHTML =
                 '<div class="ms-profile-header">' +
@@ -763,21 +830,21 @@ window.MalSync = (function () {
 
     function escHtml(str) {
         return String(str)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 
     function openProfileForm(profileId) {
         _editingId = profileId;
         q('pf-editorTitle').textContent = profileId ? 'Edit Profile' : 'Add Profile';
-
-        // Clear form
         q('pf-name').value = '';
+
         ['watching', 'plan_to_watch', 'on_hold', 'completed', 'dropped'].forEach(function (s) {
             var cb = q('pf-s-' + s);
             if (cb) cb.checked = false;
         });
-        // Default: specific season
         q('pf-season-specific').checked = true;
         q('pf-season-all').checked = false;
 
@@ -799,40 +866,40 @@ window.MalSync = (function () {
     }
 
     async function saveProfile() {
-        const name = q('pf-name').value.trim();
+        var name = q('pf-name').value.trim();
         if (!name) { alert('Please enter a profile name.'); return; }
 
-        const statuses = ['watching', 'plan_to_watch', 'on_hold', 'completed', 'dropped']
+        var statuses = ['watching', 'plan_to_watch', 'on_hold', 'completed', 'dropped']
             .filter(function (s) {
                 var cb = q('pf-s-' + s);
                 return cb && cb.checked;
             });
         if (!statuses.length) { alert('Please select at least one MAL status.'); return; }
 
-        const profile = {
-            id:                _editingId || ('p' + Date.now()),
-            name:              name,
-            statuses:          statuses,
+        var profile = {
+            id: _editingId || ('p' + Date.now()),
+            name: name,
+            statuses: statuses,
             requestAllSeasons: q('pf-season-all').checked,
         };
 
         if (_editingId) {
-            const idx = _profiles.findIndex(function (p) { return p.id === _editingId; });
+            var idx = _profiles.findIndex(function (p) { return p.id === _editingId; });
             if (idx >= 0) _profiles[idx] = profile;
-            else          _profiles.push(profile);
+            else _profiles.push(profile);
         } else {
             _profiles.push(profile);
         }
 
-        const status = q('pf-saveStatus');
+        var status = q('pf-saveStatus');
         status.textContent = 'Saving…';
         try {
-            await jfPost('/MalSync/config', { jellyseerrProfiles: _profiles });
+            await jfPost('/MalSync/user/config', { jellyseerrProfiles: _profiles });
             status.textContent = '✔ Saved';
             status.style.color = '#74c69d';
             setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 2000);
         } catch (e) {
-            status.textContent = '✖ ' + (e.message || 'Error saving');
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error saving');
             status.style.color = '#e76f51';
             setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
             return;
@@ -846,9 +913,9 @@ window.MalSync = (function () {
         if (!confirm('Delete this profile?')) return;
         _profiles = _profiles.filter(function (p) { return p.id !== profileId; });
         try {
-            await jfPost('/MalSync/config', { jellyseerrProfiles: _profiles });
+            await jfPost('/MalSync/user/config', { jellyseerrProfiles: _profiles });
         } catch (e) {
-            alert('Error deleting profile: ' + (e.message || 'unknown'));
+            alert('Error deleting profile: ' + (e.responseJSON?.error ?? e.message ?? 'unknown'));
         }
         renderProfileList();
     }
@@ -983,7 +1050,6 @@ window.MalSync = (function () {
         streamSse(url, q('syncLog'), q('syncSpinner'), [q('btnSync'), q('btnDryRun')]);
     }
 
-    // ── import ────────────────────────────────────────────────────────────
     function runImport(dryRun) {
         const url = _jfBase() + '/MalSync/import/stream?dryRun=' + dryRun;
         streamSse(url, q('importLog'), q('importSpinner'), [q('btnImport'), q('btnImportDry')]);
@@ -1005,732 +1071,6 @@ window.MalSyncConfigPage = {
             MalSync.init(document.getElementById('MalSyncConfigPage'));
             return;
         }
-        if (++attempts < 100) setTimeout(tryInit, 100);
-    }
-    setTimeout(tryInit, 0);
-}());
-</script>
-
-</div><!-- /MalSyncConfigPage -->
-</body>
-</html>
-<style>
-        /* ── Layout ─────────────────────────────────────────────────────── */
-        .ms-page { max-width: 760px; }
-
-        .ms-card {
-            background: var(--card-background, rgba(255,255,255,.04));
-            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
-            border-radius: 6px;
-            padding: 1.4em 1.6em;
-            margin-bottom: 1.4em;
-        }
-        .ms-card-title {
-            font-size: .78em;
-            font-weight: 700;
-            letter-spacing: .08em;
-            text-transform: uppercase;
-            color: var(--accent-color, #00a4dc);
-            opacity: .85;
-            margin: 0 0 1.1em;
-            padding-bottom: .55em;
-            border-bottom: 1px solid var(--accent-color, #00a4dc);
-            border-bottom-width: 1px;
-        }
-
-        /* ── Buttons ─────────────────────────────────────────────────────── */
-        .ms-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: .45em;
-            padding: .5em 1.2em;
-            border-radius: 3px;
-            border: none;
-            font-size: .875em;
-            font-weight: 600;
-            letter-spacing: .02em;
-            cursor: pointer;
-            transition: opacity .15s, filter .15s;
-            white-space: nowrap;
-            line-height: 1.4;
-            background: var(--button-background, rgba(255,255,255,.1));
-            color: var(--button-foreground, inherit);
-        }
-        .ms-btn:hover  { filter: brightness(1.15); }
-        .ms-btn:active { filter: brightness(.88); }
-        .ms-btn:disabled { opacity: .38; cursor: default; pointer-events: none; }
-
-        .ms-btn-primary {
-            background: var(--accent-color, #00a4dc);
-            color: #fff;
-        }
-        .ms-btn-danger {
-            background: rgba(220, 53, 69, .8);
-            color: #fff;
-        }
-        .ms-btn-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .55em;
-            align-items: center;
-            margin-top: 1.1em;
-        }
-
-        /* ── Status badge ─────────────────────────────────────────────────── */
-        .ms-status-row {
-            display: flex;
-            align-items: center;
-            gap: 1em;
-            padding: .8em 1em;
-            border-radius: 5px;
-            background: rgba(255,255,255,.03);
-            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
-            margin-bottom: 1.2em;
-        }
-        .ms-badge {
-            padding: .2em .75em;
-            border-radius: 2em;
-            font-size: .72em;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: .06em;
-            white-space: nowrap;
-            flex-shrink: 0;
-        }
-        .ms-badge-ok  { background: rgba(39,174,96,.25);  color: #4fd98a; border: 1px solid rgba(39,174,96,.55); text-shadow: 0 0 8px rgba(39,174,96,.4); }
-        .ms-badge-err { background: rgba(220,53,69,.22);  color: #ff8096; border: 1px solid rgba(220,53,69,.45); }
-        .ms-meta      { flex: 1; min-width: 0; line-height: 1.4; }
-        .ms-meta-name { font-weight: 600; font-size: .95em; }
-        .ms-meta-sub  { font-size: .78em; opacity: .45; margin-top: .1em; }
-
-        /* ── Step hint boxes ─────────────────────────────────────────────── */
-        .ms-hint {
-            border-left: 3px solid var(--accent-color, #00a4dc);
-            background: rgba(0,164,220,.06);
-            padding: .6em .95em;
-            border-radius: 0 4px 4px 0;
-            margin-bottom: .6em;
-            font-size: .85em;
-            line-height: 1.5;
-        }
-
-        /* ── Checkbox rows ───────────────────────────────────────────────── */
-        .ms-check-row {
-            display: flex;
-            align-items: flex-start;
-            gap: .65em;
-            cursor: pointer;
-            margin: .65em 0;
-            padding: .55em .75em;
-            border-radius: 4px;
-            transition: background .12s;
-        }
-        .ms-check-row:hover { background: rgba(255,255,255,.04); }
-        .ms-check-row input[type=checkbox] {
-            margin-top: .18em;
-            flex-shrink: 0;
-            width: 1em;
-            height: 1em;
-            cursor: pointer;
-            accent-color: var(--accent-color, #00a4dc);
-        }
-        .ms-check-label { font-size: .9em; font-weight: 600; }
-        .ms-check-sub   { font-size: .78em; opacity: .5; margin-top: .1em; }
-
-        /* ── Log output ──────────────────────────────────────────────────── */
-        .ms-log {
-            background: rgba(0,0,0,.5);
-            border: 1px solid var(--divider-color, rgba(255,255,255,.07));
-            border-radius: 4px;
-            padding: .85em 1em;
-            font-family: 'Consolas', 'SF Mono', 'Fira Mono', monospace;
-            font-size: .8em;
-            max-height: 380px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
-            margin-top: 1em;
-        }
-        .ms-log .log-info { color: #78c8d8; }
-        .ms-log .log-ok   { color: #5de0a0; }
-        .ms-log .log-warn { color: #ffd166; }
-        .ms-log .log-err  { color: #ff6b6b; }
-        .ms-log .log-dbg  { color: rgba(160,180,200,.38); font-size: .9em; }
-
-        /* ── Spinner ─────────────────────────────────────────────────────── */
-        .ms-spinner {
-            display: none;
-            width: 1em; height: 1em;
-            border: 2px solid rgba(255,255,255,.15);
-            border-top-color: var(--accent-color, #00a4dc);
-            border-radius: 50%;
-            animation: ms-spin .6s linear infinite;
-            flex-shrink: 0;
-        }
-        .ms-spinner.active { display: inline-block; }
-        @keyframes ms-spin { to { transform: rotate(360deg); } }
-
-        /* ── Misc ────────────────────────────────────────────────────────── */
-        .ms-hidden    { display: none !important; }
-        .ms-two-col   { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.2em; }
-        .ms-field-desc { font-size: .78em; opacity: .45; margin-top: .25em; line-height: 1.4; }
-        .ms-save-status { font-size: .82em; opacity: .7; }
-        @media (max-width: 520px) { .ms-two-col { grid-template-columns: 1fr; } }
-</style>
-<div class="content-primary ms-page">
-
-    <!-- ══════════════════════════════════════ GLOBAL SETTINGS -->
-    <div class="ms-card">
-        <p class="ms-card-title">Global Settings</p>
-
-        <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="cfgClientId">MAL Client-ID</label>
-            <input id="cfgClientId" class="emby-input" type="text"
-                   placeholder="Paste your MAL Client ID here" autocomplete="off" />
-            <div class="ms-field-desc">
-                Your MyAnimeList API client ID —
-                create one at <a href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">myanimelist.net/apiconfig</a>.
-            </div>
-        </div>
-
-        <div class="inputContainer" style="margin-top:1em">
-            <label class="inputLabel" style="position:static;font-size:.82em;opacity:.6;display:block;margin-bottom:.3em">Anime library paths</label>
-            <div id="cfgAnimePathsContainer"></div>
-            <div id="cfgAnimePathsEmpty" class="ms-field-desc">Loading libraries…</div>
-            <div class="ms-field-desc">Select the library folders that contain anime.</div>
-        </div>
-
-        <div class="ms-two-col" style="margin-top:.8em">
-            <div class="inputContainer">
-                <label class="inputLabel inputLabelUnfocused" for="cfgSimilarity">Min. title similarity</label>
-                <input id="cfgSimilarity" class="emby-input" type="number" min="0" max="1" step="0.05" value="0.6" />
-                <div class="ms-field-desc">0.0 – 1.0 · Lower = fuzzier matching</div>
-            </div>
-            <div class="inputContainer">
-                <label class="inputLabel inputLabelUnfocused" for="cfgCacheTtl">Cache TTL (days)</label>
-                <input id="cfgCacheTtl" class="emby-input" type="number" min="1" max="365" value="30" />
-                <div class="ms-field-desc">How long MAL ID lookups are cached locally</div>
-            </div>
-        </div>
-
-        <label class="ms-check-row">
-            <input id="cfgNoDowngrade" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Never downgrade MAL progress</div>
-                <div class="ms-check-sub">Won't reduce your episode count on MAL if Jellyfin shows fewer watched</div>
-            </span>
-        </label>
-
-        <label class="ms-check-row">
-            <input id="cfgJfWatched" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Mark Jellyfin episodes from MAL</div>
-                <div class="ms-check-sub">Also marks episodes as watched in Jellyfin based on your MAL list</div>
-            </span>
-        </label>
-
-        <div class="ms-hint" style="margin-top:1.1em">
-            Configure the automatic sync schedule via Jellyfin's built-in
-            <a href="#/dashboard/tasks" target="_blank" rel="noopener noreferrer"
-               style="color:var(--accent-color,#00a4dc)">Scheduled Tasks</a>.
-        </div>
-
-        <div class="ms-btn-row">
-            <button id="btnSaveConfig" type="button" class="ms-btn ms-btn-primary">Save Settings</button>
-            <span id="cfgSaveStatus" class="ms-save-status"></span>
-        </div>
-    </div>
-
-    <!-- ══════════════════════════════════════ MAL ACCOUNT -->
-    <div class="ms-card">
-        <p id="malAccountTitle" class="ms-card-title">MyAnimeList Account</p>
-
-        <div class="ms-status-row">
-            <span id="malBadge" class="ms-badge ms-badge-err">○ Not connected</span>
-            <div class="ms-meta">
-                <div id="malUsername" class="ms-meta-name"></div>
-                <div id="malExpiry"   class="ms-meta-sub"></div>
-            </div>
-        </div>
-
-        <div id="authStep1">
-            <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
-                Click <strong>Connect</strong> to open MAL authorisation in a new tab.
-                After approving, copy the full redirect URL back here.
-            </p>
-            <button id="btnConnect" type="button" class="ms-btn ms-btn-primary">Connect MAL Account</button>
-        </div>
-
-        <div id="authStep2" class="ms-hidden">
-            <div class="ms-hint"><strong>Step 1:</strong> Log in to MAL in the new tab and click <em>Allow access</em>.</div>
-            <div class="ms-hint"><strong>Step 2:</strong> You'll land on an error page — that's expected. Copy the full URL from the address bar and paste it below.</div>
-            <div class="inputContainer">
-                <label class="inputLabel inputLabelUnfocused" for="callbackUrl">Redirect URL</label>
-                <input id="callbackUrl" class="emby-input" type="text" placeholder="http://localhost/?code=…" />
-            </div>
-            <div class="ms-btn-row">
-                <button id="btnVerify"     type="button" class="ms-btn ms-btn-primary">Verify</button>
-                <button id="btnCancelAuth" type="button" class="ms-btn">Cancel</button>
-            </div>
-        </div>
-
-        <div id="authDisconnect" class="ms-hidden" style="margin-top:.6em">
-            <button id="btnDisconnect" type="button" class="ms-btn ms-btn-danger">Disconnect MAL Account</button>
-        </div>
-    </div>
-
-    <!-- ══════════════════════════════════════ MANUAL SYNC -->
-    <div class="ms-card">
-        <p class="ms-card-title">Manual Sync</p>
-
-        <label class="ms-check-row" style="margin:0 0 .9em">
-            <input id="cfgDebug" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Verbose / debug output</div>
-                <div class="ms-check-sub">Shows every series evaluated, including skipped ones</div>
-            </span>
-        </label>
-
-        <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
-            <button id="btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
-            <button id="btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
-            <span id="syncSpinner" class="ms-spinner"></span>
-        </div>
-
-        <div id="syncLog" class="ms-log ms-hidden"></div>
-    </div>
-
-    <!-- ══════════════════════════════════════ JELLYSEERR INTEGRATION -->
-    <div class="ms-card">
-        <p class="ms-card-title">Jellyseerr Integration (Global Defaults)</p>
-
-        <div class="ms-hint">
-            These are the server-wide defaults for the Jellyseerr integration. Each user can override
-            URL, API key and import statuses on their own MAL Sync account page.
-            Request specific anime seasons based on MAL list status — only the seasons you need,
-            not all seasons at once.
-        </div>
-
-        <div class="ms-two-col" style="margin-top:.9em">
-            <div class="inputContainer">
-                <label class="inputLabel inputLabelUnfocused" for="cfgJellyseerrUrl">Jellyseerr URL</label>
-                <input id="cfgJellyseerrUrl" class="emby-input" type="text"
-                       placeholder="http://jellyseerr:5055" autocomplete="off" />
-                <div class="ms-field-desc">Base URL of your Jellyseerr instance</div>
-            </div>
-            <div class="inputContainer">
-                <label class="inputLabel inputLabelUnfocused" for="cfgJellyseerrApiKey">Jellyseerr API Key</label>
-                <input id="cfgJellyseerrApiKey" class="emby-input" type="password"
-                       placeholder="Paste your Jellyseerr API key" autocomplete="off" />
-                <div class="ms-field-desc">Settings → General → API Key in Jellyseerr</div>
-            </div>
-        </div>
-
-        <div class="inputContainer" style="margin-top:.6em">
-            <label class="inputLabel inputLabelUnfocused" for="cfgJellyseerrStatuses">Import for MAL statuses</label>
-            <input id="cfgJellyseerrStatuses" class="emby-input" type="text"
-                   placeholder="plan_to_watch,watching" />
-            <div class="ms-field-desc">
-                Comma-separated MAL statuses that trigger a Jellyseerr request.
-                Valid: <code>plan_to_watch</code>, <code>watching</code>, <code>on_hold</code>, <code>dropped</code>, <code>completed</code>
-            </div>
-        </div>
-
-        <div class="ms-btn-row">
-            <button id="btnSaveJellyseerr" type="button" class="ms-btn ms-btn-primary">Save Jellyseerr Settings</button>
-            <span id="jellyseerrSaveStatus" class="ms-save-status"></span>
-        </div>
-    </div>
-
-    <!-- ══════════════════════════════════════ MAL → JELLYSEERR IMPORT -->
-    <div class="ms-card">
-        <p class="ms-card-title">MAL → Jellyseerr Import</p>
-
-        <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
-            Runs the import for your own MAL account. Each user can also trigger this from their own
-            MAL Sync account page. The scheduled task (Dashboard → Scheduled Tasks → "Import MAL list to Jellyseerr")
-            runs for all authenticated users.
-        </p>
-
-        <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
-            <button id="btnImport"    type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
-            <button id="btnImportDry" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
-            <span id="importSpinner" class="ms-spinner"></span>
-        </div>
-
-        <div id="importLog" class="ms-log ms-hidden"></div>
-    </div>
-
-</div><!-- /content-primary -->
-
-<script type="text/javascript">
-/* global ApiClient */
-
-// ── HTTP helpers using native fetch ───────────────────────────────────────────
-function _jfHeaders() {
-    return { 'X-Emby-Token': ApiClient.accessToken() };
-}
-function _jfBase() {
-    return ApiClient.serverAddress().replace(/\/$/, '');
-}
-async function jfGet(path) {
-    const r = await fetch(_jfBase() + path, { headers: _jfHeaders() });
-    if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw Object.assign(new Error(j.error || 'HTTP ' + r.status), { status: r.status, responseJSON: j });
-    }
-    return r.json();
-}
-async function jfPost(path, data) {
-    const r = await fetch(_jfBase() + path, {
-        method: 'POST',
-        headers: { ..._jfHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw Object.assign(new Error(j.error || 'HTTP ' + r.status), { status: r.status, responseJSON: j });
-    }
-    return r.json();
-}
-
-// ── Page module ───────────────────────────────────────────────────────────────
-window.MalSync = (function () {
-    let _initialized = false;
-    // Use document.getElementById – works regardless of how view is passed
-    function q(id) { return document.getElementById(id); }
-
-    function logLine(container, text) {
-        const t   = text ?? '';
-        const cls = (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) ? 'log-err'
-                  : t.startsWith('[DRY RUN]')                                 ? 'log-warn'
-                  : t.startsWith('[MAL]')                                     ? 'log-ok'
-                  : t.startsWith('[DEBUG]') || t.startsWith('[DBG]')          ? 'log-dbg'
-                  : 'log-info';
-        const div = document.createElement('div');
-        div.className   = cls;
-        div.textContent = t;
-        container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
-    }
-
-    // ── page load ─────────────────────────────────────────────────────────
-    async function init(view) {
-        if (_initialized) return;
-        _initialized = true;
-        q('btnSaveConfig').addEventListener('click', saveConfig);
-        q('btnConnect').addEventListener('click', startAuth);
-        q('btnVerify').addEventListener('click', submitCode);
-        q('btnCancelAuth').addEventListener('click', cancelAuth);
-        q('btnDisconnect').addEventListener('click', disconnect);
-        q('btnSync').addEventListener('click', function () { runSync(false); });
-        q('btnDryRun').addEventListener('click', function () { runSync(true); });
-        q('btnSaveJellyseerr').addEventListener('click', saveJellyseerrConfig);
-        q('btnImport').addEventListener('click', function () { runImport(false); });
-        q('btnImportDry').addEventListener('click', function () { runImport(true); });
-
-        await Promise.allSettled([loadConfig(), refreshStatus(), loadAccountTitle()]);
-    }
-
-    // ── account card title ────────────────────────────────────────────────
-    async function loadAccountTitle() {
-        try {
-            const me = await jfGet('/Users/Me');
-            const name = me.Name || me.name;
-            if (name) q('malAccountTitle').textContent = name + '\u2019s MyAnimeList Account';
-        } catch (_) { /* non-fatal */ }
-    }
-
-    // ── config ────────────────────────────────────────────────────────────
-    async function loadConfig() {
-        const container = q('cfgAnimePathsContainer');
-        const emptyNote = q('cfgAnimePathsEmpty');
-        emptyNote.textContent = 'Loading libraries…';
-        emptyNote.style.display = '';
-        try {
-            const cfg = await jfGet('/MalSync/config');
-            q('cfgClientId').value      = cfg.malClientId            ?? '';
-            q('cfgSimilarity').value    = cfg.malSearchMinSimilarity ?? 0.6;
-            q('cfgCacheTtl').value      = cfg.cacheTtlDays           ?? 30;
-            q('cfgNoDowngrade').checked = cfg.malNoDowngrade         ?? true;
-            q('cfgJfWatched').checked   = cfg.jfUpdateWatched        ?? false;
-            // Jellyseerr
-            q('cfgJellyseerrUrl').value       = cfg.jellyseerrUrl            ?? '';
-            q('cfgJellyseerrApiKey').value    = cfg.jellyseerrApiKey         ?? '';
-            q('cfgJellyseerrStatuses').value  = cfg.jellyseerrImportStatuses ?? 'plan_to_watch,watching';
-            // Build library-path checkboxes
-            const savedPaths = (cfg.animePaths ?? '').split(',').map(function (p) { return p.trim(); }).filter(Boolean);
-            try {
-                const libRes = await jfGet('/MalSync/libraries');
-                const paths  = libRes.paths ?? [];
-                container.innerHTML = '';
-                if (!paths.length) {
-                    emptyNote.textContent = 'No library paths found in Jellyfin.';
-                } else {
-                    emptyNote.style.display = 'none';
-                    for (const path of paths) {
-                        const lbl = document.createElement('label');
-                        lbl.className = 'checkboxContainer';
-                        // Create checkbox using the constructor option so the custom-element
-                        // upgrade happens immediately (setAttribute('is', …) after creation does not work)
-                        const cb = document.createElement('input');
-                        cb.type        = 'checkbox';
-                        cb.style.cssText = 'margin-right:.4em;width:1em;height:1em;cursor:pointer;vertical-align:middle';
-                        cb.dataset.path = path;
-                        cb.checked     = savedPaths.includes(path);
-                        const span = document.createElement('span');
-                        span.className   = 'checkboxTitle';
-                        span.textContent = path;
-                        lbl.appendChild(cb);
-                        lbl.appendChild(span);
-                        container.appendChild(lbl);
-                    }
-                }
-            } catch (e2) {
-                emptyNote.textContent = 'Could not load libraries (HTTP ' + (e2.status ?? '?') + ': ' + (e2.message ?? 'unknown') + ').';
-            }
-        } catch (e) {
-            emptyNote.textContent = 'Could not load settings – are you an admin? (' + (e.status ?? '?') + ')';
-        }
-    }
-
-    async function saveConfig() {
-        const status = q('cfgSaveStatus');
-        status.textContent = 'Saving…';
-        try {
-            const checkedPaths = Array.from(
-                q('cfgAnimePathsContainer').querySelectorAll('input[type=checkbox]:checked')
-            ).map(function (cb) { return cb.dataset.path; }).join(',');
-            await jfPost('/MalSync/config', {
-                malClientId:            q('cfgClientId').value.trim(),
-                animePaths:             checkedPaths,
-                malSearchMinSimilarity: parseFloat(q('cfgSimilarity').value),
-                cacheTtlDays:           parseInt(q('cfgCacheTtl').value, 10),
-                malNoDowngrade:         q('cfgNoDowngrade').checked,
-                jfUpdateWatched:        q('cfgJfWatched').checked,
-            });
-            status.textContent = '✔ Saved';
-            status.style.color = '#74c69d';
-        } catch (e) {
-            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error saving config');
-            status.style.color = '#e76f51';
-        }
-        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
-    }
-
-    // ── auth status ───────────────────────────────────────────────────────
-    async function refreshStatus() {
-        try {
-            const s    = await jfGet('/MalSync/status');
-            const badge    = q('malBadge');
-            const username = q('malUsername');
-            const expiry   = q('malExpiry');
-            const step1    = q('authStep1');
-            const step2    = q('authStep2');
-            const disc     = q('authDisconnect');
-
-            if (s.authenticated) {
-                badge.className   = 'ms-badge ms-badge-ok';
-                badge.textContent = '● Connected';
-                username.textContent = s.malUsername ? s.malUsername : '';
-                if (s.tokenExpires) {
-                    const d = new Date(s.tokenExpires);
-                    expiry.textContent = 'Token expires ' + d.toLocaleDateString();
-                }
-                step1.classList.add('ms-hidden');
-                step2.classList.add('ms-hidden');
-                disc.classList.remove('ms-hidden');
-            } else {
-                badge.className   = 'ms-badge ms-badge-err';
-                badge.textContent = '○ Not connected';
-                username.textContent = '';
-                expiry.textContent   = '';
-                step1.classList.remove('ms-hidden');
-                step2.classList.add('ms-hidden');
-                disc.classList.add('ms-hidden');
-            }
-        } catch (_) { /* ignore – user may not be logged in yet */ }
-    }
-
-    // ── auth flow ─────────────────────────────────────────────────────────
-    async function startAuth() {
-        // Open the window BEFORE the async call to avoid popup blockers
-        const newWin = window.open('about:blank', '_blank');
-        try {
-            const r = await jfGet('/MalSync/auth/start');
-            if (newWin) newWin.location.href = r.authUrl;
-            q('authStep1').classList.add('ms-hidden');
-            q('authStep2').classList.remove('ms-hidden');
-        } catch (e) {
-            if (newWin) newWin.close();
-            const msg = e.status === 400
-                ? 'MAL Client-ID is not configured. Please save it first.'
-                : (e.responseJSON?.error ?? 'Could not start auth flow.');
-            alert('Error: ' + msg);
-        }
-    }
-
-    function cancelAuth() {
-        q('authStep2').classList.add('ms-hidden');
-        q('authStep1').classList.remove('ms-hidden');
-        q('callbackUrl').value = '';
-    }
-
-    async function submitCode() {
-        const raw = q('callbackUrl').value.trim();
-        if (!raw) { alert('Please paste the redirect URL or code.'); return; }
-        const match = raw.match(/[?&]code=([^&]+)/);
-        const code  = match ? decodeURIComponent(match[1]) : raw;
-        try {
-            await jfPost('/MalSync/auth/callback', { code });
-            q('callbackUrl').value = '';
-            await refreshStatus();
-        } catch (e) {
-            alert('Auth failed: ' + (e.responseJSON?.error ?? e.message));
-        }
-    }
-
-    async function disconnect() {
-        if (!confirm('Disconnect your MAL account? Your watch history on MAL will not be affected.')) return;
-        try {
-            await jfPost('/MalSync/auth/disconnect', {});
-            await refreshStatus();
-        } catch (e) { alert('Error: ' + (e.responseJSON?.error ?? 'Could not disconnect.')); }
-    }
-
-    // ── sync ──────────────────────────────────────────────────────────────
-    async function runSync(dryRun) {
-        const logDiv  = q('syncLog');
-        const spinner = q('syncSpinner');
-        const btnSync = q('btnSync');
-        const btnDry  = q('btnDryRun');
-        const debug   = q('cfgDebug') && q('cfgDebug').checked;
-
-        // Show log immediately so lines appear live
-        logDiv.innerHTML = '';
-        logDiv.classList.remove('ms-hidden');
-        spinner.classList.add('active');
-        btnSync.disabled = btnDry.disabled = true;
-
-        try {
-            const url = _jfBase() + '/MalSync/sync/stream?dryRun=' + dryRun + '&debug=' + (debug ? 'true' : 'false');
-            const response = await fetch(url, { headers: _jfHeaders() });
-            if (!response.ok) {
-                logLine(logDiv, '[ERROR] HTTP ' + response.status + ': sync request failed.');
-                return;
-            }
-
-            const reader  = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            outer: while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                // Parse SSE: events are separated by "\n\n"
-                let idx;
-                while ((idx = buffer.indexOf('\n\n')) !== -1) {
-                    const chunk = buffer.slice(0, idx);
-                    buffer = buffer.slice(idx + 2);
-                    if (chunk.startsWith('data: ')) {
-                        const text = chunk.slice(6);
-                        if (text === '[DONE]') { break outer; }
-                        if (text.trim()) { logLine(logDiv, text); }
-                    }
-                }
-            }
-        } catch (e) {
-            logLine(logDiv, '[ERROR] ' + (e.message ?? 'Sync failed unexpectedly.'));
-        } finally {
-            spinner.classList.remove('active');
-            btnSync.disabled = btnDry.disabled = false;
-            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-    }
-
-    // ── Jellyseerr settings ───────────────────────────────────────────────
-    async function saveJellyseerrConfig() {
-        const status = q('jellyseerrSaveStatus');
-        status.textContent = 'Saving…';
-        try {
-            await jfPost('/MalSync/config', {
-                jellyseerrUrl:            q('cfgJellyseerrUrl').value.trim(),
-                jellyseerrApiKey:         q('cfgJellyseerrApiKey').value.trim(),
-                jellyseerrImportStatuses: q('cfgJellyseerrStatuses').value.trim(),
-            });
-            status.textContent = '✔ Saved';
-            status.style.color = '#74c69d';
-        } catch (e) {
-            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error saving config');
-            status.style.color = '#e76f51';
-        }
-        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
-    }
-
-    // ── MAL → Jellyseerr import ───────────────────────────────────────────
-    async function runImport(dryRun) {
-        const logDiv  = q('importLog');
-        const spinner = q('importSpinner');
-        const btnImp  = q('btnImport');
-        const btnDry  = q('btnImportDry');
-
-        logDiv.innerHTML = '';
-        logDiv.classList.remove('ms-hidden');
-        spinner.classList.add('active');
-        btnImp.disabled = btnDry.disabled = true;
-
-        try {
-            const url = _jfBase() + '/MalSync/import/stream?dryRun=' + dryRun;
-            const response = await fetch(url, { headers: _jfHeaders() });
-            if (!response.ok) {
-                logLine(logDiv, '[ERROR] HTTP ' + response.status + ': import request failed.');
-                return;
-            }
-
-            const reader  = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            outer: while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                let idx;
-                while ((idx = buffer.indexOf('\n\n')) !== -1) {
-                    const chunk = buffer.slice(0, idx);
-                    buffer = buffer.slice(idx + 2);
-                    if (chunk.startsWith('data: ')) {
-                        const text = chunk.slice(6);
-                        if (text === '[DONE]') { break outer; }
-                        if (text.trim()) { logLine(logDiv, text); }
-                    }
-                }
-            }
-        } catch (e) {
-            logLine(logDiv, '[ERROR] ' + (e.message ?? 'Import failed unexpectedly.'));
-        } finally {
-            spinner.classList.remove('active');
-            btnImp.disabled = btnDry.disabled = false;
-            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-    }
-
-    return { init: init };
-}());
-
-// Jellyfin calls window[pageElementId].init(view) when the page loads.
-window.MalSyncConfigPage = {
-    config: function () { return { enableScrollX: false }; },
-    init:   function (view) { MalSync.init(view); },
-};
-
-// Self-init fallback: in case PluginPages doesn't call window.MalSyncConfigPage.init()
-(function () {
-    var attempts = 0;
-    function tryInit() {
-        var btn = document.getElementById('btnSaveConfig');
-        if (btn) { MalSync.init(document.getElementById('MalSyncConfigPage')); return; }
         if (++attempts < 100) setTimeout(tryInit, 100);
     }
     setTimeout(tryInit, 0);

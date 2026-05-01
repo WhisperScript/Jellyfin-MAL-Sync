@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.MalSync.Tasks;
 /// <summary>
 /// Manually-triggered task that reads the authenticated user's MAL list and
 /// submits Jellyseerr requests for seasons whose MAL status matches the
-/// configured import statuses (e.g. plan_to_watch, watching).
+/// calling user's configured import profiles.
 /// </summary>
 public sealed class JellyseerrImportTask : IScheduledTask
 {
@@ -27,20 +27,30 @@ public sealed class JellyseerrImportTask : IScheduledTask
 
     public string Name => "Import MAL list to Jellyseerr";
     public string Key => "MalJellyseerrImport";
-    public string Description => "Reads your MAL anime list and creates Jellyseerr requests for seasons matching the configured statuses (e.g. Plan to Watch, Watching). Only specific seasons are requested — not all seasons at once.";
+    public string Description => "Runs MAL→Jellyseerr import for every authenticated user who configured personal import profiles. Requests are created as the matching Jellyfin/Jellyseerr user.";
     public string Category => "MAL Sync";
 
-    /// <summary>No automatic triggers – this task is meant to be run manually.</summary>
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => [];
+    /// <summary>Default trigger: every 12 hours.</summary>
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
+    {
+        yield return new TaskTriggerInfo
+        {
+            Type = TaskTriggerInfoType.IntervalTrigger,
+            IntervalTicks = TimeSpan.FromHours(12).Ticks,
+        };
+    }
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var cfg = MalSyncPlugin.Instance!.Configuration;
-        var users = cfg.UserConfigs.Select(u => u.UserId).ToList();
+        var users = cfg.UserConfigs
+            .Where(u => u.JellyseerrProfiles.Count > 0)
+            .Select(u => u.UserId)
+            .ToList();
 
         if (users.Count == 0)
         {
-            _logger.LogInformation("MAL→Jellyseerr import: no users configured, nothing to do.");
+            _logger.LogInformation("MAL→Jellyseerr import: no users with personal import profiles configured, nothing to do.");
             progress.Report(100);
             return;
         }

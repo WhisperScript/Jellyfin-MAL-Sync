@@ -26,10 +26,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Comma-separated library paths treated as anime.</summary>
     public string AnimePaths { get; set; } = string.Empty;
 
-    // ── Jellyseerr import profiles ─────────────────────────────────────────
-    /// <summary>Import profiles — each maps MAL statuses to Sonarr/Radarr settings in Jellyseerr.</summary>
-    public List<JellyseerrImportProfile> JellyseerrProfiles { get; set; } = new();
-
     /// <summary>Days before a cached MAL-ID is re-resolved.</summary>
     public int CacheTtlDays { get; set; } = 30;
 
@@ -52,17 +48,8 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Jellyseerr API key (Settings → General → API Key).</summary>
     public string JellyseerrApiKey { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Comma-separated MAL statuses that should trigger a Jellyseerr request.
-    /// Valid values: plan_to_watch, watching, on_hold, dropped, completed.
-    /// </summary>
-    public string JellyseerrImportStatuses { get; set; } = "plan_to_watch,watching";
-
     public string[] GetAnimePaths() =>
         AnimePaths.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-    public string[] GetJellyseerrImportStatuses() =>
-        JellyseerrImportStatuses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
 /// <summary>One import profile: maps MAL statuses to a season-request strategy in Jellyseerr.</summary>
@@ -101,9 +88,10 @@ public class UserMalConfig
     /// <summary>Mark Jellyfin episodes from MAL list. null = use global default.</summary>
     public bool? JfUpdateWatched { get; set; } = null;
 
-    // ── Per-user Jellyseerr overrides (null = fall back to global setting) ─
-    /// <summary>Jellyseerr base URL override. null = use global default.</summary>
-    public string? JellyseerrUrl { get; set; } = null;
-    /// <summary>Jellyseerr API key override. null = use global default.</summary>
-    public string? JellyseerrApiKey { get; set; } = null;
+    /// <summary>
+    /// Per-user Jellyseerr import profiles.
+    /// Each profile maps MAL statuses to a season request strategy for this user.
+    /// </summary>
+    public List<JellyseerrImportProfile> JellyseerrProfiles { get; set; } = new();
+
 }

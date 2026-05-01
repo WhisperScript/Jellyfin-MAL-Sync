@@ -134,6 +134,49 @@
         .ms-log .log-err  { color: #ff6b6b; }
         .ms-log .log-dbg  { color: rgba(160,180,200,.38); font-size: .9em; }
 
+        .ms-log-line {
+            display: grid;
+            grid-template-columns: auto auto 1fr;
+            align-items: start;
+            gap: .55em;
+            margin: 0;
+            padding: .14em 0;
+            line-height: 1.45;
+        }
+        .ms-log-time {
+            opacity: .55;
+            font-size: .72em;
+            white-space: nowrap;
+            letter-spacing: .02em;
+            min-width: 4.8em;
+            text-align: right;
+        }
+        .ms-log-badge {
+            font-size: .66em;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: .02em .45em;
+            line-height: 1.45;
+            white-space: nowrap;
+            border: 1px solid transparent;
+            min-width: 2.6em;
+            text-align: center;
+        }
+        .ms-log-msg {
+            min-width: 0;
+            word-break: break-word;
+            white-space: pre-wrap;
+            font-size: .98em;
+        }
+
+        .ms-log-line.log-info .ms-log-badge { color: #78c8d8; border-color: rgba(120,200,216,.45); background: rgba(120,200,216,.14); }
+        .ms-log-line.log-ok   .ms-log-badge { color: #5de0a0; border-color: rgba(93,224,160,.45); background: rgba(93,224,160,.14); }
+        .ms-log-line.log-warn .ms-log-badge { color: #ffd166; border-color: rgba(255,209,102,.45); background: rgba(255,209,102,.14); }
+        .ms-log-line.log-err  .ms-log-badge { color: #ff6b6b; border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.14); }
+        .ms-log-line.log-dbg  .ms-log-badge { color: rgba(160,180,200,.9); border-color: rgba(160,180,200,.35); background: rgba(160,180,200,.12); }
+
         .ms-spinner {
             display: none;
             width: 1em; height: 1em;
@@ -198,6 +241,61 @@
         }
         .ms-tab-panel { display: none; }
         .ms-tab-panel.active { display: block; }
+
+        .ms-profile-row {
+            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
+            border-radius: 5px;
+            padding: .85em 1em;
+            margin-bottom: .65em;
+            background: rgba(255,255,255,.02);
+        }
+        .ms-profile-header {
+            display: flex;
+            align-items: center;
+            gap: .7em;
+            flex-wrap: wrap;
+        }
+        .ms-profile-info { flex: 1; min-width: 0; }
+        .ms-profile-name { font-weight: 600; font-size: .92em; }
+        .ms-profile-statuses {
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: .3em;
+            margin-top: .25em;
+        }
+        .ms-tag {
+            background: rgba(0,164,220,.15);
+            color: var(--accent-color, #00a4dc);
+            border: 1px solid rgba(0,164,220,.3);
+            border-radius: 3px;
+            padding: .1em .5em;
+            font-size: .72em;
+            font-weight: 600;
+            letter-spacing: .04em;
+        }
+        .ms-profile-meta { font-size: .75em; opacity: .45; margin-top: .2em; }
+        .ms-editor-section {
+            border-top: 1px solid var(--divider-color, rgba(255,255,255,.08));
+            margin-top: 1em;
+            padding-top: 1em;
+        }
+        .ms-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: .4em .8em;
+            margin-top: .5em;
+        }
+        .ms-status-grid label {
+            display: flex;
+            align-items: center;
+            gap: .4em;
+            font-size: .88em;
+            cursor: pointer;
+        }
+        .ms-status-grid input[type=checkbox] {
+            accent-color: var(--accent-color, #00a4dc);
+            width: 1em; height: 1em;
+        }
 </style>
 
 <div class="content-primary ms-page">
@@ -256,34 +354,78 @@
     <!-- ── Tab: Import ──────────────────────────────────────────────────── -->
     <div id="u-tab-import" class="ms-tab-panel active">
 
-        <!-- Jellyseerr Settings -->
         <div class="ms-card">
-            <p class="ms-card-title">Jellyseerr Settings</p>
-            <p id="u-jellyseerrGlobalHint" class="ms-hint ms-hidden">
-                A server-wide Jellyseerr URL is configured. Leave the fields below empty to use it,
-                or enter your own values to override.
-            </p>
-            <p id="u-jellyseerrNoGlobalHint" class="ms-hint ms-hidden"
-               style="border-left-color:rgba(255,166,0,.7);background:rgba(255,166,0,.06)">
-                No global Jellyseerr URL is configured. Enter your own below, or ask your admin to set a global default.
-            </p>
+            <p class="ms-card-title">Import Profiles</p>
 
-            <div class="ms-two-col" style="margin-top:.9em">
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="u-cfgJellyseerrUrl">Jellyseerr URL</label>
-                    <input id="u-cfgJellyseerrUrl" class="emby-input" type="text"
-                           placeholder="http://jellyseerr:5055 (or leave empty for global)" autocomplete="off" />
-                </div>
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="u-cfgJellyseerrApiKey">Jellyseerr API Key</label>
-                    <input id="u-cfgJellyseerrApiKey" class="emby-input" type="password"
-                           placeholder="Leave empty to use global key" autocomplete="off" />
-                </div>
+            <div class="ms-hint">
+                Each profile maps one or more MAL statuses to a request mode for your account.
+                Imports and scheduled runs use these profiles as your Jellyfin/Jellyseerr user.
             </div>
 
-            <div class="ms-btn-row">
-                <button id="u-btnSaveJellyseerr" type="button" class="ms-btn ms-btn-primary">Save Jellyseerr Settings</button>
-                <span id="u-jellyseerrSaveStatus" class="ms-save-status"></span>
+            <div id="u-profileList" style="margin-top:.8em"></div>
+            <p id="u-profileEmpty" class="ms-field-desc" style="margin:.6em 0 0">
+                No import profiles configured yet. Add one below.
+            </p>
+
+            <div class="ms-btn-row" style="margin-top:.8em">
+                <button id="u-btnAddProfile" type="button" class="ms-btn">+ Add Profile</button>
+            </div>
+
+            <div id="u-profileEditor" class="ms-editor-section ms-hidden">
+                <p id="u-pf-editorTitle" style="font-weight:600;font-size:.95em;margin:0 0 1em">Add Profile</p>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="u-pf-name">Profile Name</label>
+                    <input id="u-pf-name" class="emby-input" type="text"
+                           placeholder="e.g. Plan to Watch" />
+                </div>
+
+                <div style="margin:.9em 0">
+                    <label style="font-size:.82em;opacity:.6;display:block;margin-bottom:.4em">
+                        MAL Statuses — request anime that has one of these statuses
+                    </label>
+                    <div class="ms-status-grid">
+                        <label><input type="checkbox" id="u-pf-s-watching" value="watching"> Watching</label>
+                        <label><input type="checkbox" id="u-pf-s-plan_to_watch" value="plan_to_watch"> Plan to Watch</label>
+                        <label><input type="checkbox" id="u-pf-s-on_hold" value="on_hold"> On Hold</label>
+                        <label><input type="checkbox" id="u-pf-s-completed" value="completed"> Completed</label>
+                        <label><input type="checkbox" id="u-pf-s-dropped" value="dropped"> Dropped</label>
+                    </div>
+                </div>
+
+                <div style="margin:.9em 0">
+                    <label style="font-size:.82em;opacity:.6;display:block;margin-bottom:.5em">
+                        Which seasons to request in Jellyseerr
+                    </label>
+                    <div style="display:flex;flex-direction:column;gap:.45em">
+                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s">
+                            <input type="radio" name="u-pf-season-mode" id="u-pf-season-specific" value="specific"
+                                   style="margin-top:.2em;flex-shrink:0;accent-color:var(--accent-color,#00a4dc)" />
+                            <span>
+                                <div style="font-weight:600;font-size:.9em">Only this season</div>
+                                <div style="font-size:.78em;opacity:.5;margin-top:.1em">
+                                    Requests only the season matching the MAL entry.
+                                </div>
+                            </span>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:.65em;cursor:pointer;padding:.55em .75em;border-radius:4px;border:1px solid var(--divider-color,rgba(255,255,255,.08));transition:background .12s">
+                            <input type="radio" name="u-pf-season-mode" id="u-pf-season-all" value="all"
+                                   style="margin-top:.2em;flex-shrink:0;accent-color:var(--accent-color,#00a4dc)" />
+                            <span>
+                                <div style="font-weight:600;font-size:.9em">All seasons</div>
+                                <div style="font-size:.78em;opacity:.5;margin-top:.1em">
+                                    Requests every season of the series for this profile.
+                                </div>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="ms-btn-row">
+                    <button id="u-btnSaveProfile" type="button" class="ms-btn ms-btn-primary">Save Profile</button>
+                    <button id="u-btnCancelProfile" type="button" class="ms-btn">Cancel</button>
+                    <span id="u-pf-saveStatus" class="ms-save-status"></span>
+                </div>
             </div>
         </div>
 
@@ -291,8 +433,8 @@
         <div class="ms-card">
             <p class="ms-card-title">MAL → Jellyseerr Import</p>
             <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
-                Reads your MAL list and submits Jellyseerr requests for every season matching your
-                configured statuses. Only the specific seasons you need are requested — not all seasons at once.
+                Reads your MAL list and submits Jellyseerr requests for entries matching your personal import profiles.
+                The scheduled task runs this automatically for every authenticated user who configured profiles.
             </p>
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
                 <button id="u-btnImport"    type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
@@ -395,20 +537,46 @@ async function uJfPost(path, data) {
 // ── Page module ───────────────────────────────────────────────────────────────
 window.MalSyncUser = (function () {
     let _initialized = false;
+    let _profiles = [];
+    let _editingId = null;
     function q(id) { return document.getElementById(id); }
 
     function logLine(container, text) {
         const t = text ?? '';
-        const cls = (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) ? 'log-err'
-                  : t.startsWith('[DRY RUN]')                                 ? 'log-warn'
-                  : t.startsWith('[MAL]')                                     ? 'log-ok'
-                  : t.startsWith('[DEBUG]') || t.startsWith('[DBG]')          ? 'log-dbg'
-                  : 'log-info';
-        const div = document.createElement('div');
-        div.className   = cls;
-        div.textContent = t;
-        container.appendChild(div);
+        const info = classifyLogLine(t);
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+        const row = document.createElement('div');
+        row.className = 'ms-log-line ' + info.cls;
+
+        const tEl = document.createElement('span');
+        tEl.className = 'ms-log-time';
+        tEl.textContent = time;
+
+        const bEl = document.createElement('span');
+        bEl.className = 'ms-log-badge';
+        bEl.textContent = info.badge;
+
+        const msg = document.createElement('span');
+        msg.className = 'ms-log-msg';
+        msg.textContent = t;
+
+        row.appendChild(tEl);
+        row.appendChild(bEl);
+        row.appendChild(msg);
+        container.appendChild(row);
         container.scrollTop = container.scrollHeight;
+    }
+
+    function classifyLogLine(t) {
+        if (t.startsWith('[REQUEST]')) return { cls: 'log-ok', badge: 'REQ' };
+        if (t.startsWith('[SKIP]')) return { cls: 'log-warn', badge: 'SKIP' };
+        if (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) return { cls: 'log-err', badge: 'ERR' };
+        if (t.startsWith('[DRY RUN]')) return { cls: 'log-warn', badge: 'DRY' };
+        if (t.startsWith('[MAL]')) return { cls: 'log-ok', badge: 'MAL' };
+        if (t.startsWith('[DEBUG]') || t.startsWith('[DBG]')) return { cls: 'log-dbg', badge: 'DBG' };
+        if (t.startsWith('Sync complete.') || t.startsWith('Import complete.')) return { cls: 'log-ok', badge: 'DONE' };
+        return { cls: 'log-info', badge: 'INFO' };
     }
 
     async function init() {
@@ -433,9 +601,19 @@ window.MalSyncUser = (function () {
         q('u-btnSync').addEventListener('click', function () { runSync(false); });
         q('u-btnDryRun').addEventListener('click', function () { runSync(true); });
         q('u-btnSaveUserConfig').addEventListener('click', saveUserConfig);
-        q('u-btnSaveJellyseerr').addEventListener('click', saveJellyseerrConfig);
+        q('u-btnAddProfile').addEventListener('click', function () { openProfileForm(null); });
+        q('u-btnSaveProfile').addEventListener('click', saveProfile);
+        q('u-btnCancelProfile').addEventListener('click', cancelProfileForm);
         q('u-btnImport').addEventListener('click', function () { runImport(false); });
         q('u-btnImportDry').addEventListener('click', function () { runImport(true); });
+
+        q('u-profileList').addEventListener('click', function (e) {
+            var btn = e.target.closest('button');
+            if (!btn) return;
+            var id = btn.dataset.profileId;
+            if (btn.classList.contains('ms-btn-edit')) openProfileForm(id);
+            if (btn.classList.contains('ms-btn-del')) deleteProfile(id);
+        });
 
         await Promise.allSettled([refreshStatus(), loadAccountTitle(), loadUserConfig(), checkAdmin()]);
     }
@@ -463,15 +641,8 @@ window.MalSyncUser = (function () {
             const cfg = await uJfGet('/MalSync/user/config');
             q('u-cfgNoDowngrade').checked = cfg.noDowngrade     ?? true;
             q('u-cfgJfWatched').checked   = cfg.jfUpdateWatched ?? false;
-            // Jellyseerr per-user overrides (empty = using global)
-            q('u-cfgJellyseerrUrl').value    = cfg.jellyseerrUrl    ?? '';
-            q('u-cfgJellyseerrApiKey').value = cfg.jellyseerrApiKey ?? '';
-            // Show appropriate hint
-            if (cfg.globalJellyseerrConfigured) {
-                q('u-jellyseerrGlobalHint').classList.remove('ms-hidden');
-            } else {
-                q('u-jellyseerrNoGlobalHint').classList.remove('ms-hidden');
-            }
+            _profiles = cfg.jellyseerrProfiles ?? [];
+            renderProfileList();
         } catch (_) { /* non-fatal */ }
     }
 
@@ -492,21 +663,136 @@ window.MalSyncUser = (function () {
         setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
     }
 
-    async function saveJellyseerrConfig() {
-        const status = q('u-jellyseerrSaveStatus');
+    function renderProfileList() {
+        var list = q('u-profileList');
+        var empty = q('u-profileEmpty');
+        list.innerHTML = '';
+
+        if (!_profiles.length) {
+            empty.classList.remove('ms-hidden');
+            return;
+        }
+        empty.classList.add('ms-hidden');
+
+        _profiles.forEach(function (p) {
+            var tags = (p.statuses || []).map(function (s) {
+                return '<span class="ms-tag">' + s.replace(/_/g, ' ') + '</span>';
+            }).join('');
+
+            var seasonLabel = p.requestAllSeasons ? 'All seasons' : 'Specific season';
+            var row = document.createElement('div');
+            row.className = 'ms-profile-row';
+            row.innerHTML =
+                '<div class="ms-profile-header">' +
+                '  <div class="ms-profile-info">' +
+                '    <div class="ms-profile-name">' + escHtml(p.name || 'Unnamed') + '</div>' +
+                '    <div class="ms-profile-statuses">' + (tags || '<span style="opacity:.4;font-size:.8em">no statuses</span>') + '</div>' +
+                '    <div class="ms-profile-meta">' + escHtml(seasonLabel) + '</div>' +
+                '  </div>' +
+                '  <div style="display:flex;gap:.4em;flex-shrink:0">' +
+                '    <button class="ms-btn ms-btn-sm ms-btn-edit" data-profile-id="' + p.id + '">Edit</button>' +
+                '    <button class="ms-btn ms-btn-sm ms-btn-danger ms-btn-del" data-profile-id="' + p.id + '">Delete</button>' +
+                '  </div>' +
+                '</div>';
+            list.appendChild(row);
+        });
+    }
+
+    function escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function openProfileForm(profileId) {
+        _editingId = profileId;
+        q('u-pf-editorTitle').textContent = profileId ? 'Edit Profile' : 'Add Profile';
+        q('u-pf-name').value = '';
+
+        ['watching', 'plan_to_watch', 'on_hold', 'completed', 'dropped'].forEach(function (s) {
+            var cb = q('u-pf-s-' + s);
+            if (cb) cb.checked = false;
+        });
+        q('u-pf-season-specific').checked = true;
+        q('u-pf-season-all').checked = false;
+
+        var editing = profileId ? _profiles.find(function (x) { return x.id === profileId; }) : null;
+        if (editing) {
+            q('u-pf-name').value = editing.name || '';
+            (editing.statuses || []).forEach(function (s) {
+                var cb = q('u-pf-s-' + s);
+                if (cb) cb.checked = true;
+            });
+            if (editing.requestAllSeasons) {
+                q('u-pf-season-all').checked = true;
+                q('u-pf-season-specific').checked = false;
+            }
+        }
+
+        q('u-profileEditor').classList.remove('ms-hidden');
+        q('u-profileEditor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    async function saveProfile() {
+        var name = q('u-pf-name').value.trim();
+        if (!name) { alert('Please enter a profile name.'); return; }
+
+        var statuses = ['watching', 'plan_to_watch', 'on_hold', 'completed', 'dropped']
+            .filter(function (s) {
+                var cb = q('u-pf-s-' + s);
+                return cb && cb.checked;
+            });
+        if (!statuses.length) { alert('Please select at least one MAL status.'); return; }
+
+        var profile = {
+            id: _editingId || ('p' + Date.now()),
+            name: name,
+            statuses: statuses,
+            requestAllSeasons: q('u-pf-season-all').checked,
+        };
+
+        if (_editingId) {
+            var idx = _profiles.findIndex(function (p) { return p.id === _editingId; });
+            if (idx >= 0) _profiles[idx] = profile;
+            else _profiles.push(profile);
+        } else {
+            _profiles.push(profile);
+        }
+
+        var status = q('u-pf-saveStatus');
         status.textContent = 'Saving…';
         try {
-            await uJfPost('/MalSync/user/config', {
-                jellyseerrUrl:    q('u-cfgJellyseerrUrl').value.trim(),
-                jellyseerrApiKey: q('u-cfgJellyseerrApiKey').value.trim(),
-            });
+            await uJfPost('/MalSync/user/config', { jellyseerrProfiles: _profiles });
             status.textContent = '✔ Saved';
             status.style.color = '#74c69d';
+            setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 2000);
         } catch (e) {
-            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error');
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error saving');
             status.style.color = '#e76f51';
+            setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
+            return;
         }
-        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
+
+        cancelProfileForm();
+        renderProfileList();
+    }
+
+    async function deleteProfile(profileId) {
+        if (!confirm('Delete this profile?')) return;
+        _profiles = _profiles.filter(function (p) { return p.id !== profileId; });
+        try {
+            await uJfPost('/MalSync/user/config', { jellyseerrProfiles: _profiles });
+        } catch (e) {
+            alert('Error deleting profile: ' + (e.responseJSON?.error ?? e.message ?? 'unknown'));
+        }
+        renderProfileList();
+    }
+
+    function cancelProfileForm() {
+        q('u-profileEditor').classList.add('ms-hidden');
+        _editingId = null;
     }
 
     // ── auth status ───────────────────────────────────────────────────────
@@ -692,6 +978,12 @@ window.MalSyncUser = (function () {
 window.MalSyncUserPage = {
     config: function () { return { enableScrollX: false }; },
     init:   function ()  { MalSyncUser.init(); },
+    onClose: function () { 
+        // Clean up state on page close to prevent history pollution
+        if (window.history && window.history.pushState) {
+            // Don't add extra history entries
+        }
+    }
 };
 
 (function () {
