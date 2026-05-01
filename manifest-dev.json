@@ -12,8 +12,8 @@
         "targetAbi": "10.11.0.0",
         "version": "1.1.2",
         "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/dev-task-as-mal-anime-import/Jellyfin.Plugin.MalSync_10.11.0.zip",
-        "checksum": "C11B69CE3135330DBB672F30362A340C",
-        "timestamp": "2026-05-01T18:09:25"
+        "checksum": "A82620DF26436AA088F84FCF36B183C2",
+        "timestamp": "2026-05-01T22:08:05"
       }
     ]
   }
