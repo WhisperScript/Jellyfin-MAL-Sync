@@ -170,6 +170,8 @@ public sealed class JellyseerrImportService
             var malStatus = entry.ListStatus?.Status ?? "unknown";
             var profile   = statusMap[malStatus];
 
+            _logger.LogInformation("[PROCESS] Processing MAL entry {Id} '{Title}' (status: {Status})", malId, title, malStatus);
+
             // ── Skip OVAs and specials — they are not TV series in Sonarr ──
             var malMediaType = entry.Node.MediaType?.ToLowerInvariant();
             if (malMediaType is "ova" or "special" or "music")
@@ -226,12 +228,16 @@ public sealed class JellyseerrImportService
                     // Priority 2: match the MAL title/alt-titles against TMDB season names.
                     // This is far more reliable than the MAL prequel-chain walk for franchise
                     // series (e.g. Monogatari) where MAL and TMDB organise seasons differently.
-                    var allTitles = BuildSearchQueries(title, entry.Node.AlternativeTitles, detail);
-                    if (!TryMatchSeasonByName(allTitles, tvDetail.RawSeasons, out seasonNumber))
+                    var seasonMatchCandidates = new List<string> { title };
+                    if (!string.IsNullOrWhiteSpace(entry.Node.AlternativeTitles?.En))
+                        seasonMatchCandidates.Add(entry.Node.AlternativeTitles.En);
+                    
+                    if (!TryMatchSeasonByName(seasonMatchCandidates, tvDetail.RawSeasons, out seasonNumber))
                     {
                         // Priority 3: fall back to MAL prequel chain walk
                         seasonNumber = await DetermineSeasonNumberAsync(
                             malId, token, cancellationToken, detail).ConfigureAwait(false);
+                        _logger.LogInformation("Season {Season} for '{Title}' determined via MAL prequel chain walk.", seasonNumber, title);
                     }
                     else
                     {
