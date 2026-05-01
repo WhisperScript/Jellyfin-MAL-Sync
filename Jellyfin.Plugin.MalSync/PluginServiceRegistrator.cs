@@ -3,6 +3,7 @@ using Jellyfin.Plugin.MalSync.Tasks;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.MalSync;
@@ -23,5 +24,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
 
         serviceCollection.AddSingleton<MalAuthService>();
         serviceCollection.AddSingleton<MalSyncService>();
+        serviceCollection.AddSingleton<JellyseerrImportService>();
+        serviceCollection.AddTransient<IScheduledTask, Tasks.JellyseerrImportTask>();
     }
 }

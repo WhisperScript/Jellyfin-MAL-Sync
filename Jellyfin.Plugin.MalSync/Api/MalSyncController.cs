@@ -20,6 +20,7 @@ public sealed class MalSyncController : ControllerBase
 {
     private readonly MalAuthService _auth;
     private readonly MalSyncService _sync;
+    private readonly JellyseerrImportService _jellyseerr;
     private readonly ILibraryManager _libraryManager;
     private readonly ITaskManager _taskManager;
     private readonly IUserManager _userManager;
@@ -27,12 +28,14 @@ public sealed class MalSyncController : ControllerBase
     public MalSyncController(
         MalAuthService auth,
         MalSyncService sync,
+        JellyseerrImportService jellyseerr,
         ILibraryManager libraryManager,
         ITaskManager taskManager,
         IUserManager userManager)
     {
         _auth = auth;
         _sync = sync;
+        _jellyseerr = jellyseerr;
         _libraryManager = libraryManager;
         _taskManager = taskManager;
         _userManager = userManager;
@@ -144,6 +147,8 @@ public sealed class MalSyncController : ControllerBase
             syncMinute = cfg.SyncMinute,
             syncUseInterval = cfg.SyncUseInterval,
             syncIntervalMinutes = cfg.SyncIntervalMinutes,
+            jellyseerrUrl = cfg.JellyseerrUrl,
+            jellyseerrApiKey = cfg.JellyseerrApiKey,
         });
     }
 
@@ -175,6 +180,10 @@ public sealed class MalSyncController : ControllerBase
             cfg.SyncUseInterval = body.SyncUseInterval.Value;
         if (body.SyncIntervalMinutes.HasValue)
             cfg.SyncIntervalMinutes = Math.Clamp(body.SyncIntervalMinutes.Value, 5, 10080);
+        if (body.JellyseerrUrl is not null)
+            cfg.JellyseerrUrl = body.JellyseerrUrl.Trim().TrimEnd('/');
+        if (body.JellyseerrApiKey is not null)
+            cfg.JellyseerrApiKey = body.JellyseerrApiKey.Trim();
 
         MalSyncPlugin.Instance.SaveConfiguration();
 
@@ -282,6 +291,7 @@ public sealed class MalSyncController : ControllerBase
             // Indicate whether the value is a personal override or the global default
             noDowngradeIsPersonal = uc.NoDowngrade.HasValue,
             jfUpdateWatchedIsPersonal = uc.JfUpdateWatched.HasValue,
+            jellyseerrProfiles = uc.JellyseerrProfiles,
         });
     }
 
@@ -294,12 +304,93 @@ public sealed class MalSyncController : ControllerBase
         var userId = GetUserId();
         var uc = _auth.GetOrCreateUserConfig(userId);
 
-        // null in the request means "reset to global default"
-        uc.NoDowngrade = body.NoDowngrade;
-        uc.JfUpdateWatched = body.JfUpdateWatched;
+        if (body.NoDowngrade.HasValue)
+            uc.NoDowngrade = body.NoDowngrade.Value;
+        if (body.JfUpdateWatched.HasValue)
+            uc.JfUpdateWatched = body.JfUpdateWatched.Value;
+        if (body.JellyseerrProfiles is not null)
+        {
+            uc.JellyseerrProfiles = body.JellyseerrProfiles
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .Select(p => new Configuration.JellyseerrImportProfile
+                {
+                    Id = string.IsNullOrWhiteSpace(p.Id) ? Guid.NewGuid().ToString("N")[..8] : p.Id,
+                    Name = p.Name.Trim(),
+                    Statuses = p.Statuses
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Select(s => s.Trim().ToLowerInvariant())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    RequestAllSeasons = p.RequestAllSeasons,
+                })
+                .ToList();
+        }
 
         MalSyncPlugin.Instance!.SaveConfiguration();
         return Ok(new { message = "Personal settings saved." });
+    }
+
+    // ── POST /MalSync/import/run ──────────────────────────────────────────
+    /// <summary>Triggers the MAL→Jellyseerr import for the calling user.</summary>
+    [HttpPost("import/run")]
+    [Authorize]
+    public async Task<IActionResult> RunImport([FromQuery] bool dryRun = false)
+    {
+        var userId = GetUserId();
+        if (!_auth.HasValidToken(userId))
+            return BadRequest(new { error = "Not authenticated with MAL. Please connect your account first." });
+
+        var log = await _jellyseerr.RunImportAsync(userId, dryRun).ConfigureAwait(false);
+        return Ok(new { log });
+    }
+
+    // ── GET /MalSync/import/stream ────────────────────────────────────────
+    /// <summary>Streams MAL→Jellyseerr import log lines as Server-Sent Events.</summary>
+    [HttpGet("import/stream")]
+    [Authorize]
+    public async Task StreamImport([FromQuery] bool dryRun = false)
+    {
+        Response.ContentType = "text/event-stream; charset=utf-8";
+        Response.Headers["Cache-Control"] = "no-cache";
+        Response.Headers["X-Accel-Buffering"] = "no";
+
+        var userId = GetUserId();
+        if (!_auth.HasValidToken(userId))
+        {
+            await Response.WriteAsync("data: [ERROR] Not authenticated with MAL.\n\n").ConfigureAwait(false);
+            return;
+        }
+
+        var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleWriter = true, SingleReader = true });
+
+        var importTask = Task.Run(async () =>
+        {
+            try
+            {
+                await _jellyseerr.RunImportAsync(
+                    userId, dryRun,
+                    onLog: line => channel.Writer.TryWrite(line),
+                    cancellationToken: HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        });
+
+        try
+        {
+            await foreach (var line in channel.Reader.ReadAllAsync(HttpContext.RequestAborted).ConfigureAwait(false))
+            {
+                await Response.WriteAsync($"data: {line}\n\n").ConfigureAwait(false);
+                await Response.Body.FlushAsync(HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+            await Response.WriteAsync("data: [DONE]\n\n").ConfigureAwait(false);
+            await Response.Body.FlushAsync(HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { /* client disconnected */ }
+
+        try { await importTask.ConfigureAwait(false); } catch { /* already handled inside */ }
     }
 
     // ── GET /MalSync/is-admin ─────────────────────────────────────────────
@@ -344,11 +435,14 @@ public sealed class MalSyncController : ControllerBase
         public int? SyncMinute { get; set; }
         public bool? SyncUseInterval { get; set; }
         public int? SyncIntervalMinutes { get; set; }
+        public string? JellyseerrUrl { get; set; }
+        public string? JellyseerrApiKey { get; set; }
     }
 
     public sealed class UserConfigRequest
     {
         public bool? NoDowngrade { get; set; }
         public bool? JfUpdateWatched { get; set; }
+        public List<Configuration.JellyseerrImportProfile>? JellyseerrProfiles { get; set; }
     }
 }

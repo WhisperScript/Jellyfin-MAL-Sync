@@ -6,8 +6,15 @@
     "description": "Keeps your MyAnimeList watch progress in sync with what you've watched in Jellyfin. Supports per-user MAL accounts via OAuth 2.0 PKCE, live log streaming, dry-run mode, sequel chain resolution, and flexible scheduling.",
     "owner": "WhisperScript",
     "category": "General",
-    "imageUrl": "https://raw.githubusercontent.com/WhisperScript/Jellyfin-MAL-Sync/main/icon.png",
     "versions": [
+        {
+          "changelog": "",
+          "targetAbi": "10.11.0.0",
+          "version": "1.2.0",
+          "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.2.0/Jellyfin.Plugin.MalSync_10.11.0.zip",
+          "checksum": "",
+          "timestamp": ""
+        },
       {
         "changelog": "- Per-user MAL account page accessible via sidebar (Plugin Pages integration)\n- Per-user sync setting overrides (never-downgrade, MAL\u2192Jellyfin mark) with global fallback\n- Admin banner on user page with link to global settings\n- Dynamic username in MAL account card title",
         "targetAbi": "10.11.0.0",
