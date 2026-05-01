@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.MalSync.Configuration;
@@ -25,6 +26,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Comma-separated library paths treated as anime.</summary>
     public string AnimePaths { get; set; } = string.Empty;
 
+    // ── Jellyseerr import profiles ─────────────────────────────────────────
+    /// <summary>Import profiles — each maps MAL statuses to Sonarr/Radarr settings in Jellyseerr.</summary>
+    public List<JellyseerrImportProfile> JellyseerrProfiles { get; set; } = new();
+
     /// <summary>Days before a cached MAL-ID is re-resolved.</summary>
     public int CacheTtlDays { get; set; } = 30;
 
@@ -40,8 +45,43 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Repeat interval in minutes (used when SyncUseInterval is true).</summary>
     public int SyncIntervalMinutes { get; set; } = 60;
 
+    // ── Jellyseerr / MAL Import settings ──────────────────────────────────
+    /// <summary>Base URL of the Jellyseerr instance (e.g. http://jellyseerr:5055).</summary>
+    public string JellyseerrUrl { get; set; } = string.Empty;
+
+    /// <summary>Jellyseerr API key (Settings → General → API Key).</summary>
+    public string JellyseerrApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Comma-separated MAL statuses that should trigger a Jellyseerr request.
+    /// Valid values: plan_to_watch, watching, on_hold, dropped, completed.
+    /// </summary>
+    public string JellyseerrImportStatuses { get; set; } = "plan_to_watch,watching";
+
     public string[] GetAnimePaths() =>
         AnimePaths.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    public string[] GetJellyseerrImportStatuses() =>
+        JellyseerrImportStatuses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+/// <summary>One import profile: maps MAL statuses to a season-request strategy in Jellyseerr.</summary>
+public class JellyseerrImportProfile
+{
+    /// <summary>Stable identifier (short random hex string).</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "Default";
+    /// <summary>MAL status values that activate this profile (e.g. "plan_to_watch", "watching").</summary>
+    [JsonPropertyName("statuses")]
+    public List<string> Statuses { get; set; } = new();
+    /// <summary>
+    /// When true, request ALL seasons of the series in Jellyseerr.
+    /// When false (default), request only the season that corresponds to this MAL entry.
+    /// </summary>
+    [JsonPropertyName("requestAllSeasons")]
+    public bool RequestAllSeasons { get; set; } = false;
 }
 
 /// <summary>Per-Jellyfin-user MAL token set and personal sync preferences.</summary>
@@ -60,4 +100,10 @@ public class UserMalConfig
     public bool? NoDowngrade { get; set; } = null;
     /// <summary>Mark Jellyfin episodes from MAL list. null = use global default.</summary>
     public bool? JfUpdateWatched { get; set; } = null;
+
+    // ── Per-user Jellyseerr overrides (null = fall back to global setting) ─
+    /// <summary>Jellyseerr base URL override. null = use global default.</summary>
+    public string? JellyseerrUrl { get; set; } = null;
+    /// <summary>Jellyseerr API key override. null = use global default.</summary>
+    public string? JellyseerrApiKey { get; set; } = null;
 }

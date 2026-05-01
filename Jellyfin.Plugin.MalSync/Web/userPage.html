@@ -165,6 +165,39 @@
         }
         .ms-admin-banner a { color: var(--accent-color, #00a4dc); text-decoration: none; }
         .ms-admin-banner a:hover { text-decoration: underline; }
+
+        .ms-two-col { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.2em; }
+        @media (max-width: 520px) { .ms-two-col { grid-template-columns: 1fr; } }
+
+        /* ── Tabs ────────────────────────────────────────────────────────── */
+        .ms-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--divider-color, rgba(255,255,255,.1));
+            margin-bottom: 1.4em;
+        }
+        .ms-tab {
+            padding: .6em 1.4em;
+            font-size: .85em;
+            font-weight: 600;
+            letter-spacing: .04em;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: inherit;
+            opacity: .5;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: opacity .15s, border-color .15s;
+        }
+        .ms-tab:hover { opacity: .8; }
+        .ms-tab.active {
+            opacity: 1;
+            color: var(--accent-color, #00a4dc);
+            border-bottom-color: var(--accent-color, #00a4dc);
+        }
+        .ms-tab-panel { display: none; }
+        .ms-tab-panel.active { display: block; }
 </style>
 
 <div class="content-primary ms-page">
@@ -176,7 +209,7 @@
         <a href="#!/configurationpage?name=MAL+Sync">Dashboard → Plugins → MAL Sync</a>.</span>
     </div>
 
-    <!-- ══════════════════════════════════════ MAL ACCOUNT -->
+    <!-- ══════════════════════════════════════ MAL ACCOUNT (always visible) -->
     <div class="ms-card">
         <p id="u-malAccountTitle" class="ms-card-title">MyAnimeList Account</p>
 
@@ -214,55 +247,117 @@
         </div>
     </div>
 
-    <!-- ══════════════════════════════════════ SYNC -->
-    <div class="ms-card">
-        <p class="ms-card-title">Sync</p>
-
-        <label class="ms-check-row" style="margin:0 0 .9em">
-            <input id="u-cfgDebug" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Verbose / debug output</div>
-                <div class="ms-check-sub">Shows every series evaluated, including skipped ones</div>
-            </span>
-        </label>
-
-        <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
-            <button id="u-btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
-            <button id="u-btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
-            <span id="u-syncSpinner" class="ms-spinner"></span>
-        </div>
-
-        <div id="u-syncLog" class="ms-log ms-hidden"></div>
+    <!-- ══════════════════════════════════════ TABS -->
+    <div class="ms-tabs">
+        <button class="ms-tab active" data-tab="u-tab-import">Import</button>
+        <button class="ms-tab"        data-tab="u-tab-sync">Sync</button>
     </div>
 
-    <!-- ══════════════════════════════════════ PERSONAL SETTINGS -->
-    <div class="ms-card">
-        <p class="ms-card-title">Personal Sync Settings</p>
-        <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.85em;opacity:.65">
-            These override the server-wide defaults for your account only.
-        </p>
+    <!-- ── Tab: Import ──────────────────────────────────────────────────── -->
+    <div id="u-tab-import" class="ms-tab-panel active">
 
-        <label class="ms-check-row">
-            <input id="u-cfgNoDowngrade" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Never downgrade MAL progress</div>
-                <div class="ms-check-sub">Won't reduce your episode count on MAL if Jellyfin shows fewer watched</div>
-            </span>
-        </label>
+        <!-- Jellyseerr Settings -->
+        <div class="ms-card">
+            <p class="ms-card-title">Jellyseerr Settings</p>
+            <p id="u-jellyseerrGlobalHint" class="ms-hint ms-hidden">
+                A server-wide Jellyseerr URL is configured. Leave the fields below empty to use it,
+                or enter your own values to override.
+            </p>
+            <p id="u-jellyseerrNoGlobalHint" class="ms-hint ms-hidden"
+               style="border-left-color:rgba(255,166,0,.7);background:rgba(255,166,0,.06)">
+                No global Jellyseerr URL is configured. Enter your own below, or ask your admin to set a global default.
+            </p>
 
-        <label class="ms-check-row">
-            <input id="u-cfgJfWatched" type="checkbox" />
-            <span>
-                <div class="ms-check-label">Mark Jellyfin episodes from MAL</div>
-                <div class="ms-check-sub">Also marks episodes as watched in Jellyfin based on your MAL list</div>
-            </span>
-        </label>
+            <div class="ms-two-col" style="margin-top:.9em">
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="u-cfgJellyseerrUrl">Jellyseerr URL</label>
+                    <input id="u-cfgJellyseerrUrl" class="emby-input" type="text"
+                           placeholder="http://jellyseerr:5055 (or leave empty for global)" autocomplete="off" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="u-cfgJellyseerrApiKey">Jellyseerr API Key</label>
+                    <input id="u-cfgJellyseerrApiKey" class="emby-input" type="password"
+                           placeholder="Leave empty to use global key" autocomplete="off" />
+                </div>
+            </div>
 
-        <div class="ms-btn-row">
-            <button id="u-btnSaveUserConfig" type="button" class="ms-btn ms-btn-primary">Save Personal Settings</button>
-            <span id="u-userCfgStatus" class="ms-save-status"></span>
+            <div class="ms-btn-row">
+                <button id="u-btnSaveJellyseerr" type="button" class="ms-btn ms-btn-primary">Save Jellyseerr Settings</button>
+                <span id="u-jellyseerrSaveStatus" class="ms-save-status"></span>
+            </div>
         </div>
-    </div>
+
+        <!-- MAL → Jellyseerr Import -->
+        <div class="ms-card">
+            <p class="ms-card-title">MAL → Jellyseerr Import</p>
+            <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.87em;opacity:.7">
+                Reads your MAL list and submits Jellyseerr requests for every season matching your
+                configured statuses. Only the specific seasons you need are requested — not all seasons at once.
+            </p>
+            <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
+                <button id="u-btnImport"    type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
+                <button id="u-btnImportDry" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <span id="u-importSpinner" class="ms-spinner"></span>
+            </div>
+            <div id="u-importLog" class="ms-log ms-hidden"></div>
+        </div>
+
+    </div><!-- /u-tab-import -->
+
+    <!-- ── Tab: Sync ────────────────────────────────────────────────────── -->
+    <div id="u-tab-sync" class="ms-tab-panel">
+
+        <!-- Sync -->
+        <div class="ms-card">
+            <p class="ms-card-title">Sync</p>
+
+            <label class="ms-check-row" style="margin:0 0 .9em">
+                <input id="u-cfgDebug" type="checkbox" />
+                <span>
+                    <div class="ms-check-label">Verbose / debug output</div>
+                    <div class="ms-check-sub">Shows every series evaluated, including skipped ones</div>
+                </span>
+            </label>
+
+            <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
+                <button id="u-btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
+                <button id="u-btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <span id="u-syncSpinner" class="ms-spinner"></span>
+            </div>
+
+            <div id="u-syncLog" class="ms-log ms-hidden"></div>
+        </div>
+
+        <!-- Personal Sync Settings -->
+        <div class="ms-card">
+            <p class="ms-card-title">Personal Sync Settings</p>
+            <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.85em;opacity:.65">
+                These override the server-wide defaults for your account only.
+            </p>
+
+            <label class="ms-check-row">
+                <input id="u-cfgNoDowngrade" type="checkbox" />
+                <span>
+                    <div class="ms-check-label">Never downgrade MAL progress</div>
+                    <div class="ms-check-sub">Won't reduce your episode count on MAL if Jellyfin shows fewer watched</div>
+                </span>
+            </label>
+
+            <label class="ms-check-row">
+                <input id="u-cfgJfWatched" type="checkbox" />
+                <span>
+                    <div class="ms-check-label">Mark Jellyfin episodes from MAL</div>
+                    <div class="ms-check-sub">Also marks episodes as watched in Jellyfin based on your MAL list</div>
+                </span>
+            </label>
+
+            <div class="ms-btn-row">
+                <button id="u-btnSaveUserConfig" type="button" class="ms-btn ms-btn-primary">Save Personal Settings</button>
+                <span id="u-userCfgStatus" class="ms-save-status"></span>
+            </div>
+        </div>
+
+    </div><!-- /u-tab-sync -->
 
 </div><!-- /content-primary -->
 
@@ -320,6 +415,17 @@ window.MalSyncUser = (function () {
         if (_initialized) return;
         _initialized = true;
 
+        // ── Tab switching ──────────────────────────────────────────────
+        document.querySelectorAll('.ms-tab').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                document.querySelectorAll('.ms-tab').forEach(function (t) { t.classList.remove('active'); });
+                document.querySelectorAll('.ms-tab-panel').forEach(function (p) { p.classList.remove('active'); });
+                btn.classList.add('active');
+                var panel = document.getElementById(btn.dataset.tab);
+                if (panel) panel.classList.add('active');
+            });
+        });
+
         q('u-btnConnect').addEventListener('click', startAuth);
         q('u-btnVerify').addEventListener('click', submitCode);
         q('u-btnCancelAuth').addEventListener('click', cancelAuth);
@@ -327,6 +433,9 @@ window.MalSyncUser = (function () {
         q('u-btnSync').addEventListener('click', function () { runSync(false); });
         q('u-btnDryRun').addEventListener('click', function () { runSync(true); });
         q('u-btnSaveUserConfig').addEventListener('click', saveUserConfig);
+        q('u-btnSaveJellyseerr').addEventListener('click', saveJellyseerrConfig);
+        q('u-btnImport').addEventListener('click', function () { runImport(false); });
+        q('u-btnImportDry').addEventListener('click', function () { runImport(true); });
 
         await Promise.allSettled([refreshStatus(), loadAccountTitle(), loadUserConfig(), checkAdmin()]);
     }
@@ -354,6 +463,15 @@ window.MalSyncUser = (function () {
             const cfg = await uJfGet('/MalSync/user/config');
             q('u-cfgNoDowngrade').checked = cfg.noDowngrade     ?? true;
             q('u-cfgJfWatched').checked   = cfg.jfUpdateWatched ?? false;
+            // Jellyseerr per-user overrides (empty = using global)
+            q('u-cfgJellyseerrUrl').value    = cfg.jellyseerrUrl    ?? '';
+            q('u-cfgJellyseerrApiKey').value = cfg.jellyseerrApiKey ?? '';
+            // Show appropriate hint
+            if (cfg.globalJellyseerrConfigured) {
+                q('u-jellyseerrGlobalHint').classList.remove('ms-hidden');
+            } else {
+                q('u-jellyseerrNoGlobalHint').classList.remove('ms-hidden');
+            }
         } catch (_) { /* non-fatal */ }
     }
 
@@ -374,6 +492,23 @@ window.MalSyncUser = (function () {
         setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
     }
 
+    async function saveJellyseerrConfig() {
+        const status = q('u-jellyseerrSaveStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/user/config', {
+                jellyseerrUrl:    q('u-cfgJellyseerrUrl').value.trim(),
+                jellyseerrApiKey: q('u-cfgJellyseerrApiKey').value.trim(),
+            });
+            status.textContent = '✔ Saved';
+            status.style.color = '#74c69d';
+        } catch (e) {
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error');
+            status.style.color = '#e76f51';
+        }
+        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
+    }
+
     // ── auth status ───────────────────────────────────────────────────────
     async function refreshStatus() {
         try {
@@ -384,7 +519,6 @@ window.MalSyncUser = (function () {
             const step1    = q('u-authStep1');
             const step2    = q('u-authStep2');
             const disc     = q('u-authDisconnect');
-            const syncCard = q('u-btnSync').closest('.ms-card');
 
             if (s.authenticated) {
                 badge.className   = 'ms-badge ms-badge-ok';
@@ -397,7 +531,6 @@ window.MalSyncUser = (function () {
                 step1.classList.add('ms-hidden');
                 step2.classList.add('ms-hidden');
                 disc.classList.remove('ms-hidden');
-                syncCard && syncCard.classList.remove('ms-hidden');
             } else {
                 badge.className   = 'ms-badge ms-badge-err';
                 badge.textContent = '○ Not connected';
@@ -406,7 +539,6 @@ window.MalSyncUser = (function () {
                 step1.classList.remove('ms-hidden');
                 step2.classList.add('ms-hidden');
                 disc.classList.add('ms-hidden');
-                syncCard && syncCard.classList.add('ms-hidden');
             }
         } catch (_) { /* ignore */ }
     }
@@ -501,6 +633,54 @@ window.MalSyncUser = (function () {
         } finally {
             spinner.classList.remove('active');
             btnSync.disabled = btnDry.disabled = false;
+            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    // ── MAL → Jellyseerr import ───────────────────────────────────────────
+    async function runImport(dryRun) {
+        const logDiv  = q('u-importLog');
+        const spinner = q('u-importSpinner');
+        const btnImp  = q('u-btnImport');
+        const btnDry  = q('u-btnImportDry');
+
+        logDiv.innerHTML = '';
+        logDiv.classList.remove('ms-hidden');
+        spinner.classList.add('active');
+        btnImp.disabled = btnDry.disabled = true;
+
+        try {
+            const url = _uJfBase() + '/MalSync/import/stream?dryRun=' + dryRun;
+            const response = await fetch(url, { headers: _uJfHeaders() });
+            if (!response.ok) {
+                logLine(logDiv, '[ERROR] HTTP ' + response.status + ': import request failed.');
+                return;
+            }
+
+            const reader  = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            outer: while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                    const chunk = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+                    if (chunk.startsWith('data: ')) {
+                        const text = chunk.slice(6);
+                        if (text === '[DONE]') { break outer; }
+                        if (text.trim()) { logLine(logDiv, text); }
+                    }
+                }
+            }
+        } catch (e) {
+            logLine(logDiv, '[ERROR] ' + (e.message ?? 'Import failed unexpectedly.'));
+        } finally {
+            spinner.classList.remove('active');
+            btnImp.disabled = btnDry.disabled = false;
             logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
