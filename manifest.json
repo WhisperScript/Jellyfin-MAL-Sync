@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "changelog": "",
+        "targetAbi": "10.11.0.0",
+        "version": "1.2.2",
+        "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.2.2/Jellyfin.Plugin.MalSync_10.11.0.zip",
+        "checksum": "80FA1BCAFA6E9D2468C1FDE4ED66C5CC",
+        "timestamp": "2026-05-02T18:16:17"
+      },
+      {
         "changelog": "- Fix S1/S2 mismatch in MAL title resolution (e.g. Baka & Test)\n- Add S1 sequel-candidate rejection with fallback remap\n- Reduce false sequel detection for titles ending in honorific '-san'\n- Register MAL sync scheduled task correctly\n- Respect configured sync trigger defaults instead of hardcoded task time",
         "targetAbi": "10.11.0.0",
         "version": "1.2.1",
