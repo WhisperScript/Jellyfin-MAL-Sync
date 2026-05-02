@@ -28,6 +28,12 @@ public sealed class MalSyncService
         @"\b(2nd|3rd|4th|5th|6th|7th|8th|\d+th|season\s*[2-9]|part\s*[2-9]|\bii\b|\biii\b|\biv\b)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Some franchises encode sequel numbering using Japanese words, e.g. "... Ni!".
+    private static readonly Regex JapaneseSequelSuffixRe = new(
+        // Note: omit "san" to avoid false positives on honorific suffixes (e.g. "Alya-san").
+        @"\b(ni|yon|shi|go|roku|nana|hachi|kyuu)\s*!?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly IHttpClientFactory _httpFactory;
     private readonly MalAuthService _auth;
     private readonly ILibraryManager _libraryManager;
@@ -158,8 +164,15 @@ public sealed class MalSyncService
 
                 // ── Resolve MAL ID ─────────────────────────────────────
                 string? malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList");
+                if (malId is not null)
+                    Dbg($"Using Jellyfin season provider MAL ID {malId} for '{seriesName}' S{seasonNum}.");
 
-                if (malId is null) malId = GetCachedMalId(cacheScope, seriesName, seasonNum, cfg.CacheTtlDays);
+                if (malId is null)
+                {
+                    malId = GetCachedMalId(cacheScope, seriesName, seasonNum, cfg.CacheTtlDays);
+                    if (malId is not null)
+                        Dbg($"Using cached MAL ID {malId} for '{seriesName}' S{seasonNum}.");
+                }
                 if (malId is not null && seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
 
                 if (malId is null)
@@ -167,6 +180,7 @@ public sealed class MalSyncService
                     malId = FindIdInUserList(malTitleEntries, seriesName, seasonNum, cfg.MalSearchMinSimilarity);
                     if (malId is not null)
                     {
+                        Dbg($"Using MAL user-list match ID {malId} for '{seriesName}' S{seasonNum}.");
                         if (seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
                         SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
                     }
@@ -209,6 +223,51 @@ public sealed class MalSyncService
                             malId = await SearchMalIdAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
                         }
                         if (malId is not null) SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                    }
+                }
+
+                // Guard against S1 resolving to sequel IDs (e.g. "... 2", "... Ni!").
+                if (seasonNum == 1 && malId is not null)
+                {
+                    var looksLikeSequel = await IsLikelySequelCandidateAsync(
+                        malId, malUserList, malHeaders, cancellationToken).ConfigureAwait(false);
+
+                    if (looksLikeSequel)
+                    {
+                        Dbg($"Rejecting S1 candidate MAL ID {malId} for '{seriesName}' because the title looks like a sequel. Retrying without this ID.");
+
+                        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { malId };
+                        var remapped = FindIdInUserList(
+                            malTitleEntries,
+                            seriesName,
+                            seasonNum,
+                            cfg.MalSearchMinSimilarity,
+                            excluded);
+
+                        if (remapped is null)
+                        {
+                            Dbg($"No usable MAL list match left for '{seriesName}' S1, searching title with exclusion…");
+                            remapped = await SearchMalIdAsync(
+                                seriesName,
+                                malHeaders,
+                                1,
+                                cfg.MalSearchMinSimilarity,
+                                cancellationToken,
+                                excluded).ConfigureAwait(false);
+                        }
+
+                        if (remapped is not null)
+                        {
+                            malId = remapped;
+                            s1IdCache[seriesId] = malId;
+                            SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                            Dbg($"S1 remap for '{seriesName}': using MAL ID {malId} after sequel rejection.");
+                        }
+                        else
+                        {
+                            Dbg($"Skipping '{seriesName}' S1: only sequel-like MAL candidates were found.");
+                            malId = null;
+                        }
                     }
                 }
 
@@ -541,7 +600,8 @@ public sealed class MalSyncService
 
     private async Task<string?> SearchMalIdAsync(
         string title, Dictionary<string, string> headers, int seasonNum,
-        double minSimilarity, CancellationToken ct)
+        double minSimilarity, CancellationToken ct,
+        ISet<string>? excludedIds = null)
     {
         try
         {
@@ -555,10 +615,18 @@ public sealed class MalSyncService
             var doc = await resp.Content.ReadFromJsonAsync<MalSearchPage>(cancellationToken: ct).ConfigureAwait(false);
             string? bestId = null;
             double bestScore = 0;
+            string? bestNonSequelId = null;
+            double bestNonSequelScore = 0;
+
+            var baseQuery = StripSeasonSuffix(title);
 
             foreach (var entry in doc?.Data ?? Enumerable.Empty<MalSearchEntry>())
             {
                 var node = entry.Node;
+                var nodeId = node.Id.ToString();
+                if (excludedIds is not null && excludedIds.Contains(nodeId))
+                    continue;
+
                 var alt = node.AlternativeTitles ?? new();
                 var candidates = new List<string> { node.Title ?? "" };
                 if (!string.IsNullOrEmpty(alt.En)) candidates.Add(alt.En);
@@ -566,10 +634,26 @@ public sealed class MalSyncService
 
                 var score = candidates.Max(c => TitleSimilarity(title, c));
                 var allTitles = string.Join(" ", candidates);
+                var isSequelCandidate = IsSequelTitle(allTitles);
 
                 if (seasonNum == 1)
                 {
-                    if (IsSequelTitle(allTitles)) score *= 0.3;
+                    var baseCandidates = candidates.Select(StripSeasonSuffix).ToList();
+                    var baseScore = baseCandidates.Max(c => TitleSimilarity(baseQuery, c));
+                    score = Math.Min(score, baseScore);
+
+                    var qFirst = NormalizeTitle(baseQuery).Split(' ').FirstOrDefault() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(qFirst))
+                    {
+                        var firstScore = baseCandidates
+                            .Select(c => NormalizeTitle(c).Split(' ').FirstOrDefault() ?? string.Empty)
+                            .Select(w => Similarity(qFirst, w))
+                            .DefaultIfEmpty(0).Max();
+                        if (firstScore < 0.5) score *= 0.15;
+                    }
+
+                    // Strongly discourage sequel-looking titles when searching for S1.
+                    if (isSequelCandidate) score *= 0.12;
                 }
                 else
                 {
@@ -593,9 +677,20 @@ public sealed class MalSyncService
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    bestId = node.Id.ToString();
+                    bestId = nodeId;
+                }
+
+                if (seasonNum == 1 && !isSequelCandidate && score > bestNonSequelScore)
+                {
+                    bestNonSequelScore = score;
+                    bestNonSequelId = nodeId;
                 }
             }
+
+            // For S1, prefer non-sequel matches only; this avoids mapping S1 → S2
+            // when both entries have very similar base titles.
+            if (seasonNum == 1)
+                return bestNonSequelScore >= minSimilarity ? bestNonSequelId : null;
 
             if (bestScore >= minSimilarity) return bestId;
         }
@@ -605,28 +700,59 @@ public sealed class MalSyncService
 
     private string? FindIdInUserList(
         List<(string Norm, string Id, string Title)> entries,
-        string seriesName, int seasonNum, double minSimilarity)
+        string seriesName, int seasonNum, double minSimilarity,
+        ISet<string>? excludedIds = null)
     {
         if (entries.Count == 0) return null;
 
         string? bestId = null;
         double bestScore = 0;
+        string? bestNonSequelId = null;
+        double bestNonSequelScore = 0;
 
         if (seasonNum == 1)
         {
             var normQ = NormalizeTitle(seriesName);
+            var baseQ = NormalizeTitle(StripSeasonSuffix(seriesName));
+            var qFirst = baseQ.Split(' ').FirstOrDefault() ?? string.Empty;
             foreach (var (norm, mid, _) in entries)
             {
+                if (excludedIds is not null && excludedIds.Contains(mid))
+                    continue;
+
+                var isSequelCandidate = IsSequelTitle(norm);
                 var score = Similarity(normQ, norm);
-                if (IsSequelTitle(norm)) score *= 0.3;
+                var baseT = NormalizeTitle(StripSeasonSuffix(norm));
+                score = Math.Min(score, Similarity(baseQ, baseT));
+
+                if (!string.IsNullOrEmpty(qFirst))
+                {
+                    var tFirst = baseT.Split(' ').FirstOrDefault() ?? string.Empty;
+                    if (Similarity(qFirst, tFirst) < 0.5) score *= 0.15;
+                }
+
+                // Strongly discourage sequel-looking titles when matching S1.
+                if (isSequelCandidate) score *= 0.12;
                 if (score > bestScore) { bestScore = score; bestId = mid; }
+
+                if (!isSequelCandidate && score > bestNonSequelScore)
+                {
+                    bestNonSequelScore = score;
+                    bestNonSequelId = mid;
+                }
             }
+
+            // For S1, only accept non-sequel candidates from the user's list.
+            return bestNonSequelScore >= minSimilarity ? bestNonSequelId : null;
         }
         else
         {
             var baseQ = NormalizeTitle(StripSeasonSuffix(seriesName));
             foreach (var (norm, mid, orig) in entries)
             {
+                if (excludedIds is not null && excludedIds.Contains(mid))
+                    continue;
+
                 var baseT = NormalizeTitle(StripSeasonSuffix(orig));
                 var score = Similarity(baseQ, baseT);
                 if (!ContainsSeasonNumber(norm, seasonNum)) score *= 0.4;
@@ -642,6 +768,46 @@ public sealed class MalSyncService
         }
 
         return bestScore >= minSimilarity ? bestId : null;
+    }
+
+    private async Task<bool> IsLikelySequelCandidateAsync(
+        string malId,
+        Dictionary<string, MalUserEntry> malUserList,
+        Dictionary<string, string> headers,
+        CancellationToken ct)
+    {
+        // Prefer title from the authenticated user's list (no extra call).
+        if (malUserList.TryGetValue(malId, out var listEntry)
+            && !string.IsNullOrWhiteSpace(listEntry.Title)
+            && IsSequelTitle(listEntry.Title))
+            return true;
+
+        // Fallback: fetch title/alt titles directly for this MAL ID.
+        try
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+
+            var resp = await http.GetAsync(
+                $"https://api.myanimelist.net/v2/anime/{malId}?fields=title,alternative_titles",
+                ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return false;
+
+            var info = await resp.Content.ReadFromJsonAsync<MalNode>(cancellationToken: ct).ConfigureAwait(false);
+            if (info is null) return false;
+
+            var titles = new List<string>();
+            if (!string.IsNullOrWhiteSpace(info.Title)) titles.Add(info.Title);
+            if (!string.IsNullOrWhiteSpace(info.AlternativeTitles?.En)) titles.Add(info.AlternativeTitles.En!);
+            if (info.AlternativeTitles?.Synonyms is not null)
+                titles.AddRange(info.AlternativeTitles.Synonyms.Where(s => !string.IsNullOrWhiteSpace(s))!);
+
+            return titles.Any(IsSequelTitle);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -707,20 +873,43 @@ public sealed class MalSyncService
     }
 
     private static bool IsSequelTitle(string text)
-        => SequelRe.IsMatch(text);
+    {
+        if (SequelRe.IsMatch(text)) return true;
+
+        var t = NormalizeTitle(text);
+        if (JapaneseSequelSuffixRe.IsMatch(t)) return true;
+
+        // Trailing standalone number (e.g. "... 2") can indicate a sequel.
+        if (Regex.IsMatch(t, @"\s+[2-9]\s*$", RegexOptions.IgnoreCase)) return true;
+
+        return false;
+    }
 
     private static bool ContainsSeasonNumber(string text, int n)
     {
-        text = text.ToLowerInvariant();
-        var indicators = n switch
+        text = NormalizeTitle(text);
+
+        // Numeric indicators: "2nd", "season 2", "part 2", trailing " 2".
+        var ordinalSuffix = n switch
         {
-            2 => new[] { "2nd", "season 2", " ii", "part 2", " 2 " },
-            3 => new[] { "3rd", "season 3", " iii", "part 3" },
-            4 => new[] { "4th", "season 4", " iv", "part 4" },
-            5 => new[] { "5th", "season 5", " v ", "part 5" },
-            _ => new[] { $"{n}th", $"season {n}", $"part {n}", $" {n}", $"{n} " },
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
         };
-        return indicators.Any(text.Contains);
+
+        if (Regex.IsMatch(text, $@"\b{n}{ordinalSuffix}\b", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(text, $@"\bseason\s*{n}\b", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(text, $@"\bpart\s*{n}\b", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(text, $@"\b{n}\b", RegexOptions.IgnoreCase)) return true;
+
+        // Roman numerals and Japanese words for common sequels.
+        if (n == 2 && Regex.IsMatch(text, @"\bii\b|\bni\s*!?\s*$", RegexOptions.IgnoreCase)) return true;
+        if (n == 3 && Regex.IsMatch(text, @"\biii\b", RegexOptions.IgnoreCase)) return true;
+        if (n == 4 && Regex.IsMatch(text, @"\biv\b|\byon\s*!?\s*$|\bshi\s*!?\s*$", RegexOptions.IgnoreCase)) return true;
+        if (n == 5 && Regex.IsMatch(text, @"\bv\b|\bgo\s*!?\s*$", RegexOptions.IgnoreCase)) return true;
+
+        return false;
     }
 
     // ═════════════════════════════════════════════════════════════════════

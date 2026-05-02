@@ -35,10 +35,24 @@ public sealed class MalSyncTask : IScheduledTask
 
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
+        var cfg = MalSyncPlugin.Instance?.Configuration;
+        if (cfg?.SyncUseInterval == true)
+        {
+            yield return new TaskTriggerInfo
+            {
+                Type = TaskTriggerInfoType.IntervalTrigger,
+                IntervalTicks = TimeSpan.FromMinutes(Math.Clamp(cfg.SyncIntervalMinutes, 5, 10080)).Ticks,
+            };
+            yield break;
+        }
+
+        var hour = Math.Clamp(cfg?.SyncHour ?? 3, 0, 23);
+        var minute = Math.Clamp(cfg?.SyncMinute ?? 0, 0, 59);
+
         yield return new TaskTriggerInfo
         {
             Type = TaskTriggerInfoType.DailyTrigger,
-            TimeOfDayTicks = TimeSpan.FromHours(3).Ticks,
+            TimeOfDayTicks = TimeSpan.FromHours(hour).Add(TimeSpan.FromMinutes(minute)).Ticks,
         };
     }
 

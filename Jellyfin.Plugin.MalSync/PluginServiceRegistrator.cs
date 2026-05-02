@@ -25,6 +25,7 @@ public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<MalAuthService>();
         serviceCollection.AddSingleton<MalSyncService>();
         serviceCollection.AddSingleton<JellyseerrImportService>();
+        serviceCollection.AddTransient<IScheduledTask, Tasks.MalSyncTask>();
         serviceCollection.AddTransient<IScheduledTask, Tasks.JellyseerrImportTask>();
     }
 }
