@@ -7,9 +7,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT="$SCRIPT_DIR/Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj"
 OUT="$SCRIPT_DIR/dist"
+VERSION=$(grep -oP '(?<=<Version>)[^<]+' "$PROJECT" | head -n1)
 
 # Default Jellyfin plugin path (adjust if yours differs)
-JF_PLUGIN_DIR="${JF_PLUGIN_DIR:-/var/lib/jellyfin/plugins/MalSync}"
+# Use a versioned folder so Jellyfin can track installed versions correctly.
+JF_PLUGIN_DIR="${JF_PLUGIN_DIR:-/var/lib/jellyfin/plugins/MAL Sync_${VERSION}}"
 
 echo "=== Jellyfin MAL Sync – Build ==="
 
