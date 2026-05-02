@@ -2,6 +2,8 @@
 bin/
 obj/
 dist/
+dist_*/
+release/
 
 # dotnet install script (local tooling, not part of the plugin)
 dotnet-install.sh
