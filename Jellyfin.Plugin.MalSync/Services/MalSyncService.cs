@@ -298,7 +298,20 @@ public sealed class MalSyncService
 
                 // ── Load Jellyfin episodes ─────────────────────────────
                 var episodes = GetEpisodes(Guid.Parse(seasonId), jfUser);
-                if (episodes.Count == 0) continue;
+                if (episodes.Count == 0)
+                {
+                    // Fallback: some libraries store episodes directly under the series
+                    // without explicit Season folders – try fetching by series ID filtered
+                    // to the correct season number.
+                    Dbg($"  → '{seriesName}' S{seasonNum}: no episodes found under season ID {seasonId}, trying series-level fallback…");
+                    episodes = GetEpisodesBySeriesAndSeason(Guid.Parse(seriesId), seasonNum, jfUser);
+                    if (episodes.Count == 0)
+                    {
+                        Dbg($"  → '{seriesName}' S{seasonNum}: no episodes found at series level either, skipping.");
+                        continue;
+                    }
+                    Dbg($"  → '{seriesName}' S{seasonNum}: series-level fallback returned {episodes.Count} episode(s).");
+                }
 
                 // Season offset for absolute-numbered shows
                 var minIdx = episodes.Min(e => e.IndexNumber ?? 1);
@@ -429,6 +442,25 @@ public sealed class MalSyncService
             IsMissing = false,
         });
         return items.Select(i => ToJfItem(i, user)).ToList();
+    }
+
+    /// <summary>
+    /// Fallback for libraries where episodes live directly under the series
+    /// without an intermediate Season folder. Fetches all episodes of the series
+    /// and filters by <paramref name="seasonNumber"/>.
+    /// </summary>
+    private List<JfItem> GetEpisodesBySeriesAndSeason(Guid seriesId, int seasonNumber, User user)
+    {
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = [BaseItemKind.Episode],
+            AncestorIds = [seriesId],
+            IsMissing = false,
+        });
+        return items
+            .Where(i => (i.ParentIndexNumber ?? 1) == seasonNumber)
+            .Select(i => ToJfItem(i, user))
+            .ToList();
     }
 
     private JfItem ToJfItem(BaseItem item, User user)
