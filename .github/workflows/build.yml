@@ -76,9 +76,9 @@ jobs:
             --notes "Automated dev build from branch \`${BRANCH}\`. Not for production use." \
             --prerelease
 
-          # Read version from csproj (strip trailing .0 for 3-part version)
+          # Read version from csproj (keep 4-part version to match assembly version)
           VERSION_FULL=$(grep -oP '(?<=<Version>)[^<]+' Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj)
-          DEV_VERSION=$(echo "$VERSION_FULL" | sed 's/\.0$//')
+          DEV_VERSION="$VERSION_FULL"
 
           # Update manifest-dev.json on this branch
           python3 - "$DEV_VERSION" "$CHECKSUM" "$SOURCE_URL" "$TIMESTAMP" <<'PYEOF'
@@ -122,7 +122,7 @@ jobs:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
-          VERSION="${TAG#v}"
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj)
           CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_10.11.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
           SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_10.11.0.zip"
