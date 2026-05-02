@@ -161,6 +161,7 @@ public sealed class MalSyncService
             {
                 var seasonNum = season.IndexNumber ?? 1;
                 var seasonId = season.Id;
+                var normalizedSeriesName = NormalizeTitle(seriesName);
 
                 // ── Resolve MAL ID ─────────────────────────────────────
                 string? malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList");
@@ -169,7 +170,7 @@ public sealed class MalSyncService
 
                 if (malId is null)
                 {
-                    malId = GetCachedMalId(cacheScope, seriesName, seasonNum, cfg.CacheTtlDays);
+                    malId = GetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, cfg.CacheTtlDays);
                     if (malId is not null)
                         Dbg($"Using cached MAL ID {malId} for '{seriesName}' S{seasonNum}.");
                 }
@@ -182,7 +183,7 @@ public sealed class MalSyncService
                     {
                         Dbg($"Using MAL user-list match ID {malId} for '{seriesName}' S{seasonNum}.");
                         if (seasonNum == 1) s1IdCache.TryAdd(seriesId, malId);
-                        SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                        SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId);
                     }
                 }
 
@@ -199,7 +200,7 @@ public sealed class MalSyncService
                         if (malId is not null)
                         {
                             s1IdCache.TryAdd(seriesId, malId);
-                            SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                            SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId);
                         }
                     }
                     else
@@ -222,7 +223,10 @@ public sealed class MalSyncService
                             Dbg($"Sequel chain failed, direct search for '{seriesName} {suffix}'…");
                             malId = await SearchMalIdAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
                         }
-                        if (malId is not null) SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                        if (malId is not null) 
+                        {
+                            SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId);
+                        }
                     }
                 }
 
@@ -260,7 +264,7 @@ public sealed class MalSyncService
                         {
                             malId = remapped;
                             s1IdCache[seriesId] = malId;
-                            SetCachedMalId(cacheScope, seriesName, seasonNum, malId);
+                            SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId);
                             Dbg($"S1 remap for '{seriesName}': using MAL ID {malId} after sequel rejection.");
                         }
                         else
@@ -755,7 +759,7 @@ public sealed class MalSyncService
 
                 var baseT = NormalizeTitle(StripSeasonSuffix(orig));
                 var score = Similarity(baseQ, baseT);
-                if (!ContainsSeasonNumber(norm, seasonNum)) score *= 0.4;
+                if (!ContainsSeasonNumber(orig, seasonNum)) score *= 0.4;
 
                 var qParts = baseQ.Split(' ');
                 var tParts = baseT.Split(' ');
