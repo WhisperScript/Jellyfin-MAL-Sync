@@ -10,6 +10,14 @@
       {
         "changelog": "",
         "targetAbi": "10.11.0.0",
+        "version": "1.2.3.0",
+        "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.2.3.0/Jellyfin.Plugin.MalSync_10.11.0.zip",
+        "checksum": "81288482A2FBB673334AE07DE9E78D71",
+        "timestamp": "2026-05-02T21:14:03"
+      },
+      {
+        "changelog": "",
+        "targetAbi": "10.11.0.0",
         "version": "1.2.2.0",
         "sourceUrl": "https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/download/v1.2.2/Jellyfin.Plugin.MalSync_10.11.0.zip",
         "checksum": "80FA1BCAFA6E9D2468C1FDE4ED66C5CC",
