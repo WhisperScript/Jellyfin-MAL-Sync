@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "changelog": "- New Settings tab: Personal Sync Settings and Push Notifications moved out of Sync tab into a dedicated tab\n- Push Notifications: added Import Errors and Import Summary notification types\n- Push Notifications: fixed webhook notification checkboxes not being saved or loaded\n- Push Notifications: import webhook notifications are now actually sent after each import run\n- Fix: log auto-scroll no longer fights the user when scrolling up during live output\n- Fix: import log no longer hidden after switching from Preview mode to Import/Dry Run\n- UI: removed max-width constraint on user page (uses full available width)\n- UI: log panels always visible with placeholder text; no more hidden-until-clicked behaviour\n- UI: consistent Dry Run button labels across Import and Sync tabs\n- UI: series list in Manage tab is now scrollable (max-height 560 px)\n- UI: full English localisation — all remaining German strings removed",
+        "targetAbi": "10.11.0.0",
+        "version": "1.3.0.0",
+        "sourceUrl": "",
+        "checksum": "",
+        "timestamp": ""
+      },
+      {
         "changelog": "",
         "targetAbi": "10.11.0.0",
         "version": "1.2.3.0",

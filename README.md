@@ -22,6 +22,9 @@ Syncs Jellyfin anime watch progress with **MyAnimeList** per user and optionally
    - overlap guard (manual + cron import overlap is skipped safely)
 - **Automatic season detection** (title parsing, TMDB season-name matching, MAL prequel fallback)
 - **MAL → Jellyfin watched sync** (optional)
+- **Push notifications** via Discord, Slack, Gotify, or any generic webhook:
+   - Stale episode ranges, sync errors, sync summary
+   - Import errors, import summary
 
 ---
 
@@ -132,6 +135,7 @@ Use Jellyfin **Dashboard → Scheduled Tasks**:
 | Never downgrade override | User-level sync behavior override |
 | Mark Jellyfin from MAL override | User-level MAL→Jellyfin override |
 | Import Profiles | Status filters + request season mode |
+| Push Notifications | Webhook URL + per-event toggles for sync and import |
 
 ---
 
