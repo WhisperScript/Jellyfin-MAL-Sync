@@ -36,10 +36,25 @@ public sealed class JellyseerrImportService
     // PUBLIC ENTRY POINT
     // ═══════════════════════════════════════════════════════════════════════
 
+    /// <summary>Structured result item returned by preview/dry-run imports.</summary>
+    public sealed class ImportPreviewItem
+    {
+        [JsonPropertyName("malId")]           public string MalId            { get; set; } = string.Empty;
+        [JsonPropertyName("malTitle")]        public string MalTitle         { get; set; } = string.Empty;
+        [JsonPropertyName("malImageUrl")]     public string? MalImageUrl     { get; set; }
+        [JsonPropertyName("seasonNumber")]    public int? SeasonNumber       { get; set; }
+        [JsonPropertyName("requestAllSeasons")] public bool RequestAllSeasons { get; set; }
+        [JsonPropertyName("profileName")]     public string ProfileName      { get; set; } = string.Empty;
+        [JsonPropertyName("malStatus")]       public string MalStatus        { get; set; } = string.Empty;
+    }
+
     public async Task<List<string>> RunImportAsync(
         string jellyfinUserId,
         bool dryRun,
         Action<string>? onLog = null,
+        List<ImportPreviewItem>? previewItems = null,
+        Action<ImportPreviewItem>? onPreviewItem = null,
+        Action<int, int>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
         var log = new List<string>();
@@ -154,6 +169,8 @@ public sealed class JellyseerrImportService
 
         if (toRequest.Count == 0) { Log("Nothing to import."); return log; }
 
+        onProgress?.Invoke(0, toRequest.Count);
+
         if (dryRun)
             Log("[DRY RUN – no requests will be submitted to Jellyseerr]");
 
@@ -206,7 +223,7 @@ public sealed class JellyseerrImportService
         var detailMap = detailResults.ToDictionary(x => x.Id, x => x.Detail);
         Log("MAL details pre-fetched.");
 
-        int submitted = 0, skipped = 0, failed = 0;
+        int submitted = 0, skipped = 0, failed = 0, processedCount = 0;
         // Cache TMDB→(seasons, tvdbId, isAnime, rawSeasons) lookups to avoid redundant HTTP calls and transient failures
         var tvDetailCache = new Dictionary<int, (List<int> Seasons, int? TvdbId, bool IsAnime, List<JellyseerrTvSeason> RawSeasons)>();
 
@@ -220,6 +237,14 @@ public sealed class JellyseerrImportService
             var profile = statusMap[malStatus];
 
             _logger.LogInformation("[PROCESS] Processing MAL entry {Id} '{Title}' (status: {Status})", malId, title, malStatus);
+
+            // ── Check user import block list ──────────────────────────────
+            if (userCfg.ImportBlocks.Any(b => b.MalId == malId))
+            {
+                _logger.LogDebug("'{Title}' (MAL {Id}) is on the import block list, skipping.", title, malId);
+                skipped++;
+                continue;
+            }
 
             // ── Skip OVAs and specials — they are not TV series in Sonarr ──
             var malMediaType = entry.Node.MediaType?.ToLowerInvariant();
@@ -461,16 +486,89 @@ public sealed class JellyseerrImportService
             else
             {
                 submitted++;
+                var previewItem = new ImportPreviewItem
+                {
+                    MalId = malId,
+                    MalTitle = title,
+                    MalImageUrl = entry.Node.MainPicture?.Medium,
+                    SeasonNumber = requestAllSeasons ? null : (int?)seasonNumber,
+                    RequestAllSeasons = requestAllSeasons,
+                    ProfileName = profile.Name,
+                    MalStatus = malStatus,
+                };
+                previewItems?.Add(previewItem);
+                onPreviewItem?.Invoke(previewItem);
             }
+
+            processedCount++;
+            onProgress?.Invoke(processedCount, toRequest.Count);
         }
 
         var verb = dryRun ? "would be submitted" : "submitted";
         Log($"Import complete. {submitted} request(s) {verb}, {skipped} skipped, {failed} failed.");
+
+        // ── Post-import webhook notifications ─────────────────────────────
+        if (!string.IsNullOrEmpty(userCfg.WebhookUrl))
+        {
+            if (userCfg.WebhookOnImportErrors)
+            {
+                var errors = log
+                    .Where(l => l.StartsWith("[ERROR]") && !l.Contains("Not authenticated"))
+                    .ToList();
+                if (errors.Count > 0)
+                {
+                    var desc = $"**{errors.Count} Fehler** beim Import erkannt:\n" +
+                               string.Join("\n", errors.Take(5).Select(l => $"• `{l}`"));
+                    if (errors.Count > 5) desc += $"\n_{errors.Count - 5} weitere Fehler_";
+                    _ = SendWebhookAsync(userCfg.WebhookUrl, "❌ MAL→Jellyseerr Import: Fehler", desc);
+                }
+            }
+
+            if (userCfg.WebhookOnImportSummary && !dryRun && submitted > 0)
+            {
+                var requests = log.Where(l => l.StartsWith("[REQUEST]")).ToList();
+                var desc = $"**{submitted} Anfrage(n)** an Jellyseerr übermittelt:\n" +
+                           string.Join("\n", requests.Take(10).Select(l => $"• {l.Replace("[REQUEST] ", "")}"));
+                if (requests.Count > 10) desc += $"\n_{requests.Count - 10} weitere_";
+                _ = SendWebhookAsync(userCfg.WebhookUrl, "✅ Import abgeschlossen", desc);
+            }
+        }
+
         return log;
         }
         finally
         {
             gate.Release();
+        }
+    }
+
+    private async Task SendWebhookAsync(string webhookUrl, string title, string description)
+    {
+        try
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            var payload = new
+            {
+                username = "MAL Sync",
+                embeds = new[]
+                {
+                    new
+                    {
+                        title,
+                        description,
+                        color = 16744448,
+                        footer = new { text = "MAL Sync • Jellyfin" },
+                    }
+                }
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            await http.PostAsync(webhookUrl,
+                new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to send import webhook to {Url}", webhookUrl);
         }
     }
 
@@ -483,7 +581,7 @@ public sealed class JellyseerrImportService
         var result  = new List<MalListEntry>();
         var url     = "https://api.myanimelist.net/v2/users/@me/animelist";
         // alternative_titles fetched here so we don't need a per-entry detail call just for English names
-        var @params = "fields=list_status,num_episodes,alternative_titles,media_type&limit=1000&nsfw=true";
+        var @params = "fields=list_status,num_episodes,alternative_titles,media_type,main_picture&limit=1000&nsfw=true";
 
         while (!string.IsNullOrEmpty(url))
         {
@@ -1140,6 +1238,12 @@ public sealed class JellyseerrImportService
         [JsonPropertyName("alternative_titles")] public MalAlternativeTitles? AlternativeTitles { get; set; }
         /// <summary>MAL media type: tv, ova, movie, special, ona, music</summary>
         [JsonPropertyName("media_type")]         public string?               MediaType         { get; set; }
+        [JsonPropertyName("main_picture")]       public MalPicture?           MainPicture       { get; set; }
+    }
+    private sealed class MalPicture
+    {
+        [JsonPropertyName("medium")] public string? Medium { get; set; }
+        [JsonPropertyName("large")]  public string? Large  { get; set; }
     }
 
     private sealed class MalListStatus

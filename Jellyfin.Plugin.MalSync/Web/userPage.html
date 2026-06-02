@@ -7,7 +7,20 @@
 <body>
 <div id="MalSyncUserPage" data-role="page" class="page libraryPage">
 <style>
-        .ms-page { max-width: 680px; }
+        .ms-page { width: 100%; box-sizing: border-box; }
+        .ms-log-placeholder {
+            color: rgba(255,255,255,.2);
+            font-size: .82em;
+            text-align: center;
+            padding: .85em;
+            font-style: italic;
+        }
+
+        /* Expand Jellyfin's wrapping container so our page can breathe */
+        :has(> #MalSyncUserPage) {
+            max-width: none !important;
+            width: 100% !important;
+        }
 
         .ms-card {
             background: var(--card-background, rgba(255,255,255,.04));
@@ -296,6 +309,438 @@
             accent-color: var(--accent-color, #00a4dc);
             width: 1em; height: 1em;
         }
+
+        /* ── Manage tab ──────────────────────────────────────────────────── */
+        .ms-series-filter {
+            display: flex;
+            gap: .6em;
+            align-items: center;
+            margin-bottom: 1em;
+        }
+        .ms-series-filter input {
+            flex: 1;
+        }
+
+        .ms-series-row {
+            display: flex;
+            gap: .9em;
+            padding: .7em .9em;
+            border: 1px solid var(--divider-color, rgba(255,255,255,.08));
+            border-radius: 5px;
+            margin-bottom: .5em;
+            background: rgba(255,255,255,.02);
+            align-items: flex-start;
+        }
+        .ms-series-poster {
+            width: 52px;
+            min-width: 52px;
+            height: 74px;
+            border-radius: 3px;
+            background: rgba(255,255,255,.06);
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .ms-series-poster-placeholder {
+            width: 52px;
+            min-width: 52px;
+            height: 74px;
+            border-radius: 3px;
+            background: rgba(255,255,255,.06);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4em;
+            opacity: .3;
+            flex-shrink: 0;
+        }
+        .ms-series-info { flex: 1; min-width: 0; }
+        .ms-series-name {
+            font-weight: 600;
+            font-size: .92em;
+            margin-bottom: .45em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ms-season-row {
+            display: flex;
+            align-items: center;
+            gap: .5em;
+            padding: .3em 0;
+            border-top: 1px solid rgba(255,255,255,.04);
+            flex-wrap: wrap;
+        }
+        .ms-season-num {
+            font-size: .72em;
+            font-weight: 700;
+            letter-spacing: .05em;
+            background: rgba(255,255,255,.08);
+            border-radius: 3px;
+            padding: .1em .45em;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ms-mal-thumb {
+            width: 22px;
+            height: 31px;
+            object-fit: cover;
+            border-radius: 2px;
+            flex-shrink: 0;
+            background: rgba(255,255,255,.06);
+        }
+        .ms-mal-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .ms-mal-title {
+            font-size: .78em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ms-mal-id {
+            font-size: .68em;
+            opacity: .4;
+        }
+        .ms-season-actions { display: flex; gap: .3em; flex-shrink: 0; }
+
+        .ms-badge-pinned {
+            background: rgba(39,174,96,.2);
+            color: #4fd98a;
+            border: 1px solid rgba(39,174,96,.4);
+            border-radius: 2px;
+            font-size: .64em;
+            font-weight: 700;
+            letter-spacing: .05em;
+            padding: .1em .4em;
+            white-space: nowrap;
+        }
+        .ms-badge-blocked {
+            background: rgba(220,53,69,.2);
+            color: #ff8096;
+            border: 1px solid rgba(220,53,69,.4);
+            border-radius: 2px;
+            font-size: .64em;
+            font-weight: 700;
+            letter-spacing: .05em;
+            padding: .1em .4em;
+            white-space: nowrap;
+        }
+        .ms-badge-source {
+            font-size: .64em;
+            opacity: .4;
+            padding: .1em .35em;
+            border-radius: 2px;
+            background: rgba(255,255,255,.06);
+            white-space: nowrap;
+        }
+        .ms-badge-unmatched {
+            background: rgba(255,150,0,.15);
+            color: #ffaa44;
+            border: 1px solid rgba(255,150,0,.35);
+            border-radius: 2px;
+            font-size: .64em;
+            font-weight: 700;
+            letter-spacing: .04em;
+            padding: .1em .4em;
+            white-space: nowrap;
+        }
+        .ms-badge-special {
+            background: rgba(150,100,255,.15);
+            color: #b088ff;
+            border: 1px solid rgba(150,100,255,.35);
+        }
+
+        #u-mgList {
+            max-height: 560px;
+            overflow-y: auto;
+            padding-right: .2em;
+        }
+
+        /* ── MAL search modal ────────────────────────────────────────────── */
+        .ms-modal-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.72);
+            z-index: 9000;
+            align-items: flex-start;
+            justify-content: center;
+            overflow-y: auto;
+            padding: 2em 1em;
+        }
+        .ms-modal-backdrop.active { display: flex; }
+        .ms-modal {
+            background: var(--card-background, #1a1a2e);
+            border: 1px solid var(--divider-color, rgba(255,255,255,.12));
+            border-radius: 8px;
+            padding: 1.4em 1.6em;
+            width: 100%;
+            max-width: 560px;
+            position: relative;
+        }
+        .ms-modal-title {
+            font-weight: 700;
+            font-size: 1em;
+            margin-bottom: 1em;
+        }
+        .ms-modal-close {
+            position: absolute;
+            top: .9em;
+            right: 1em;
+            background: none;
+            border: none;
+            color: inherit;
+            font-size: 1.3em;
+            cursor: pointer;
+            opacity: .5;
+            line-height: 1;
+            padding: .1em .3em;
+        }
+        .ms-modal-close:hover { opacity: 1; }
+
+        .ms-current-mal {
+            display: flex;
+            gap: .75em;
+            align-items: center;
+            padding: .65em .85em;
+            border-radius: 5px;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.07);
+            margin-bottom: 1em;
+        }
+        .ms-current-mal-img {
+            width: 36px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 2px;
+            flex-shrink: 0;
+            background: rgba(255,255,255,.08);
+        }
+        .ms-current-mal-info { flex: 1; min-width: 0; }
+        .ms-current-mal-title { font-weight: 600; font-size: .9em; }
+        .ms-current-mal-id { font-size: .75em; opacity: .45; }
+
+        .ms-search-results {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: .65em;
+            margin-top: .8em;
+            max-height: 340px;
+            overflow-y: auto;
+        }
+        .ms-result-card {
+            background: rgba(255,255,255,.04);
+            border: 2px solid transparent;
+            border-radius: 5px;
+            cursor: pointer;
+            overflow: hidden;
+            transition: border-color .15s, background .15s;
+        }
+        .ms-result-card:hover { background: rgba(255,255,255,.08); border-color: rgba(0,164,220,.4); }
+        .ms-result-card.selected { border-color: var(--accent-color, #00a4dc); }
+        .ms-result-img {
+            width: 100%;
+            aspect-ratio: 7/10;
+            object-fit: cover;
+            background: rgba(255,255,255,.06);
+            display: block;
+        }
+        .ms-result-body { padding: .4em .5em; }
+        .ms-result-title {
+            font-size: .72em;
+            font-weight: 600;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .ms-result-meta {
+            font-size: .65em;
+            opacity: .45;
+            margin-top: .15em;
+        }
+
+        .ms-modal-actions {
+            display: flex;
+            gap: .5em;
+            flex-wrap: wrap;
+            margin-top: 1em;
+            padding-top: 1em;
+            border-top: 1px solid rgba(255,255,255,.06);
+        }
+
+        .ms-filter-chip {
+            padding: .25em .75em;
+            border-radius: 2em;
+            border: 1px solid rgba(255,255,255,.15);
+            background: rgba(255,255,255,.05);
+            color: inherit;
+            font-size: .78em;
+            font-weight: 600;
+            cursor: pointer;
+            opacity: .55;
+            transition: opacity .12s, background .12s, border-color .12s;
+            white-space: nowrap;
+        }
+        .ms-filter-chip:hover { opacity: .8; }
+        .ms-filter-chip.active {
+            opacity: 1;
+            background: rgba(0,164,220,.18);
+            border-color: rgba(0,164,220,.55);
+            color: var(--accent-color, #00a4dc);
+        }
+        .ms-filter-chip[data-filter="pinned"].active  { background: rgba(39,174,96,.18);  border-color: rgba(39,174,96,.5);  color: #4fd98a; }
+        .ms-filter-chip[data-filter="blocked"].active { background: rgba(220,53,69,.18);  border-color: rgba(220,53,69,.5);  color: #ff8096; }
+        .ms-filter-chip[data-filter="nomatch"].active { background: rgba(255,150,0,.18);  border-color: rgba(255,150,0,.5);  color: #ffaa44; }
+
+        .ms-series-empty {
+            text-align: center;
+            padding: 2em 1em;
+            opacity: .4;
+            font-size: .9em;
+        }
+
+        /* ── Hover tooltip ───────────────────────────────────────────────── */
+        #ms-hover-tooltip {
+            display: none;
+            position: fixed;
+            z-index: 99999;
+            background: #10141f;
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 7px;
+            padding: .8em 1em;
+            width: 280px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.75);
+            pointer-events: none;
+            font-size: .8em;
+            line-height: 1.5;
+        }
+        #ms-hover-tooltip .tip-title {
+            font-weight: 700;
+            font-size: 1em;
+            margin-bottom: .25em;
+            word-break: break-word;
+        }
+        #ms-hover-tooltip .tip-alt {
+            opacity: .65;
+            font-size: .92em;
+            margin-bottom: .2em;
+        }
+        #ms-hover-tooltip .tip-genres {
+            color: var(--accent-color, #00a4dc);
+            opacity: .8;
+            margin-top: .35em;
+            font-size: .9em;
+        }
+        #ms-hover-tooltip .tip-meta {
+            opacity: .45;
+            margin-top: .25em;
+            font-size: .88em;
+        }
+        #ms-hover-tooltip .tip-divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,.08);
+            margin: .45em 0;
+        }
+        #ms-hover-tooltip .tip-layout {
+            display: flex;
+            gap: .6em;
+            align-items: flex-start;
+        }
+        #ms-hover-tooltip .tip-img {
+            width: 44px;
+            min-width: 44px;
+            height: 62px;
+            object-fit: cover;
+            border-radius: 2px;
+            background: rgba(255,255,255,.06);
+            flex-shrink: 0;
+        }
+        #ms-hover-tooltip .tip-content { flex: 1; min-width: 0; }
+
+        /* ── Responsive Manage tab ───────────────────────────────────────── */
+        .ms-manage-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.4em;
+            align-items: start;
+        }
+        @media (min-width: 600px) {
+            .ms-manage-grid {
+                grid-template-columns: 3fr 2fr;
+            }
+            .ms-manage-grid > .ms-card {
+                margin-bottom: 0;
+            }
+        }
+        /* Stack back on truly narrow viewports */
+        @media (max-width: 520px) {
+            .ms-manage-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ── Stale-range notice banner ───────────────────────────────────── */
+        .ms-notice {
+            display: flex;
+            align-items: flex-start;
+            gap: .75em;
+            padding: .75em 1em;
+            border-radius: 5px;
+            background: rgba(255,150,0,.08);
+            border: 1px solid rgba(255,150,0,.3);
+            margin-bottom: .6em;
+            font-size: .85em;
+            line-height: 1.45;
+        }
+        .ms-notice-icon { font-size: 1.1em; flex-shrink: 0; margin-top: .05em; }
+        .ms-notice-body { flex: 1; min-width: 0; }
+        .ms-notice-title { font-weight: 700; color: #ffaa44; margin-bottom: .15em; }
+        .ms-notice-text  { opacity: .8; }
+        .ms-notice-actions { display: flex; gap: .5em; margin-top: .55em; flex-wrap: wrap; }
+        .ms-notice-dismiss {
+            background: none; border: 1px solid rgba(255,255,255,.2);
+            border-radius: 3px; padding: .2em .65em;
+            font-size: .8em; cursor: pointer; color: inherit; opacity: .6;
+        }
+        .ms-notice-dismiss:hover { opacity: 1; }
+        .ms-tab-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(220,53,69,.85);
+            color: #fff;
+            border-radius: 999px;
+            font-size: .6em;
+            font-weight: 700;
+            min-width: 1.6em;
+            height: 1.6em;
+            padding: 0 .4em;
+            margin-left: .4em;
+            vertical-align: middle;
+            letter-spacing: 0;
+        }
+
+        /* ── Range pills in series list ──────────────────────────────────── */
+        .ms-range-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .25em;
+            margin-top: .3em;
+        }
+        .ms-range-pill {
+            font-size: .62em;
+            background: rgba(0,164,220,.1);
+            color: var(--accent-color, #00a4dc);
+            border: 1px solid rgba(0,164,220,.22);
+            border-radius: 2px;
+            padding: .08em .38em;
+            white-space: nowrap;
+            opacity: .9;
+            cursor: default;
+        }
 </style>
 
 <div class="content-primary ms-page">
@@ -349,10 +794,13 @@
     <div class="ms-tabs">
         <button class="ms-tab active" data-tab="u-tab-import">Import</button>
         <button class="ms-tab"        data-tab="u-tab-sync">Sync</button>
+        <button class="ms-tab"        data-tab="u-tab-settings">Settings</button>
+        <button class="ms-tab"        data-tab="u-tab-manage">Manage</button>
     </div>
 
     <!-- ── Tab: Import ──────────────────────────────────────────────────── -->
     <div id="u-tab-import" class="ms-tab-panel active">
+    <div class="ms-manage-grid">
 
         <div class="ms-card">
             <p class="ms-card-title">Import Profiles</p>
@@ -437,13 +885,35 @@
                 The scheduled task runs this automatically for every authenticated user who configured profiles.
             </p>
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
-                <button id="u-btnImport"    type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
-                <button id="u-btnImportDry" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <button id="u-btnImport"        type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
+                <button id="u-btnImportDry"     type="button" class="ms-btn">⚡ Dry Run</button>
+                <button id="u-btnImportPreview" type="button" class="ms-btn">👁 Preview</button>
                 <span id="u-importSpinner" class="ms-spinner"></span>
             </div>
-            <div id="u-importLog" class="ms-log ms-hidden"></div>
+            <div id="u-importPreviewWrap" class="ms-hidden" style="margin-top:1em">
+                <!-- Progress bar -->
+                <div id="u-previewProgressWrap" style="display:none;margin-bottom:.8em">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.3em">
+                        <span style="font-size:.78em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.45">
+                            Scanning library…
+                        </span>
+                        <span id="u-previewProgressLabel" style="font-size:.75em;opacity:.45"></span>
+                    </div>
+                    <div style="height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden">
+                        <div id="u-previewProgressBar"
+                             style="height:100%;background:var(--accent-color,#00a4dc);border-radius:2px;width:0%;transition:width .2s ease"></div>
+                    </div>
+                </div>
+                <!-- Results header -->
+                <div id="u-previewResultsHeader" style="display:none;font-size:.78em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.45;margin-bottom:.6em">
+                    Would be requested — hover and click ⊘ to block
+                </div>
+                <div id="u-importPreviewGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.6em"></div>
+            </div>
+            <div id="u-importLog" class="ms-log"><div class="ms-log-placeholder">No output — start an Import or Dry Run</div></div>
         </div>
 
+    </div><!-- /ms-manage-grid -->
     </div><!-- /u-tab-import -->
 
     <!-- ── Tab: Sync ────────────────────────────────────────────────────── -->
@@ -463,12 +933,18 @@
 
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
                 <button id="u-btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
-                <button id="u-btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <button id="u-btnDryRun" type="button" class="ms-btn">⚡ Dry Run</button>
                 <span id="u-syncSpinner" class="ms-spinner"></span>
             </div>
 
-            <div id="u-syncLog" class="ms-log ms-hidden"></div>
+            <div id="u-syncLog" class="ms-log"><div class="ms-log-placeholder">No output — start a Sync or Dry Run</div></div>
         </div>
+
+    </div><!-- /u-tab-sync -->
+
+    <!-- ── Tab: Einstellungen ─────────────────────────────────────────────── -->
+    <div id="u-tab-settings" class="ms-tab-panel">
+    <div class="ms-manage-grid">
 
         <!-- Personal Sync Settings -->
         <div class="ms-card">
@@ -499,9 +975,276 @@
             </div>
         </div>
 
-    </div><!-- /u-tab-sync -->
+        <!-- Push Notifications -->
+        <div class="ms-card">
+            <p class="ms-card-title">Push Notifications</p>
+            <p class="ms-field-desc" style="margin-bottom:.9em;font-size:.85em;opacity:.65">
+                Receive notifications via Discord, Slack, Gotify, or any generic webhook.
+                Leave empty to disable notifications.
+            </p>
+            <div class="inputContainer">
+                <label class="inputLabel inputLabelUnfocused" for="u-cfgWebhook">Webhook URL</label>
+                <input id="u-cfgWebhook" class="emby-input" type="url"
+                       placeholder="https://discord.com/api/webhooks/…" />
+            </div>
+
+            <div style="margin-top:.9em">
+                <div style="font-size:.78em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.5;margin-bottom:.15em">
+                    Sync Notifications
+                </div>
+                <label class="ms-check-row">
+                    <input id="u-wh-stale" type="checkbox" />
+                    <span>
+                        <div class="ms-check-label">Stale Episode Ranges</div>
+                        <div class="ms-check-sub">When Jellyfin has more episodes than the last MAL entry covers</div>
+                    </span>
+                </label>
+                <label class="ms-check-row">
+                    <input id="u-wh-errors" type="checkbox" />
+                    <span>
+                        <div class="ms-check-label">Sync Errors</div>
+                        <div class="ms-check-sub">When MAL updates fail (API errors, network issues)</div>
+                    </span>
+                </label>
+                <label class="ms-check-row">
+                    <input id="u-wh-summary" type="checkbox" />
+                    <span>
+                        <div class="ms-check-label">Sync Summary</div>
+                        <div class="ms-check-sub">List of all updated MAL entries after each sync</div>
+                    </span>
+                </label>
+            </div>
+
+            <div style="margin-top:.65em">
+                <div style="font-size:.78em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.5;margin-bottom:.15em">
+                    Import Notifications
+                </div>
+                <label class="ms-check-row">
+                    <input id="u-wh-imp-errors" type="checkbox" />
+                    <span>
+                        <div class="ms-check-label">Import Errors</div>
+                        <div class="ms-check-sub">When Jellyseerr requests fail (API errors, connection issues)</div>
+                    </span>
+                </label>
+                <label class="ms-check-row">
+                    <input id="u-wh-imp-summary" type="checkbox" />
+                    <span>
+                        <div class="ms-check-label">Import Summary</div>
+                        <div class="ms-check-sub">List of all requested entries after each import</div>
+                    </span>
+                </label>
+            </div>
+
+            <div class="ms-btn-row">
+                <button id="u-btnSaveWebhook" type="button" class="ms-btn ms-btn-primary">Save</button>
+                <button id="u-btnTestWebhook" type="button" class="ms-btn">🔔 Send Test</button>
+                <span id="u-webhookStatus" class="ms-save-status"></span>
+            </div>
+        </div>
+
+    </div><!-- /ms-manage-grid -->
+    </div><!-- /u-tab-settings -->
+
+    <!-- ── Tab: Manage ────────────────────────────────────────────────── -->
+    <div id="u-tab-manage" class="ms-tab-panel">
+    <div id="u-staleNotices" style="margin-bottom:1em"></div>
+    <div class="ms-manage-grid">
+
+        <div class="ms-card">
+            <p class="ms-card-title">Series Management</p>
+            <div class="ms-hint" style="margin-bottom:.9em">
+                View all anime series from your library with their resolved MAL IDs.
+                Pin a specific MAL entry to fix wrong matches, or block a series from syncing.
+            </div>
+
+            <div class="ms-series-filter">
+                <input id="u-mgFilter" class="emby-input" type="search"
+                       placeholder="Filter series…" style="margin:0" />
+                <button id="u-mgRefresh" type="button" class="ms-btn">↺ Refresh</button>
+                <button id="u-mgClearCache" type="button" class="ms-btn ms-btn-sm"
+                        title="Clear MAL-ID cache for your account">Clear Cache</button>
+                <button id="u-mgClearRanges" type="button" class="ms-btn ms-btn-sm"
+                        title="Remove ALL episode range mappings — use this to clean up incorrectly auto-detected ranges"
+                        style="border:1px solid rgba(220,53,69,.35);color:#ff8096">
+                    Clear All Ranges
+                </button>
+            </div>
+            <div id="u-mgStatusFilters" style="display:flex;flex-wrap:wrap;gap:.4em;margin-bottom:.85em">
+                <button class="ms-filter-chip active" data-filter="all">All</button>
+                <button class="ms-filter-chip" data-filter="pinned">📌 Pinned</button>
+                <button class="ms-filter-chip" data-filter="blocked">⊘ Blocked</button>
+                <button class="ms-filter-chip" data-filter="nomatch">⚠ No Match</button>
+            </div>
+
+            <div id="u-mgLoading" style="padding:1.5em 0;text-align:center;opacity:.4;font-size:.9em">
+                Loading series…
+            </div>
+            <div id="u-mgList"></div>
+        </div>
+
+        <!-- Import Block section -->
+        <div class="ms-card">
+            <p class="ms-card-title">Import Blocks</p>
+            <div class="ms-hint" style="margin-bottom:.9em">
+                MAL entries listed here are skipped during the Jellyseerr import, even if they match an active import profile.
+                Use the <strong>Edit</strong> button on any series above and click <strong>⊘ Block Import</strong>,
+                or search directly below.
+            </div>
+
+            <!-- Quick-add by search -->
+            <div style="display:flex;gap:.5em;align-items:center;margin-bottom:.8em">
+                <input id="u-blockSearchInput" class="emby-input" type="search"
+                       placeholder="Search MAL to block from import…" style="margin:0;flex:1" />
+                <button id="u-blockSearchBtn" type="button" class="ms-btn">Search</button>
+                <span id="u-blockSearchSpinner" class="ms-spinner"></span>
+            </div>
+            <div id="u-blockSearchResults" style="display:none;margin-bottom:.8em"></div>
+
+            <div style="font-size:.78em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.45;margin-bottom:.5em">
+                Blocked Entries
+            </div>
+            <div id="u-blockList"></div>
+            <p id="u-blockEmpty" class="ms-field-desc" style="margin:.4em 0 0">No import blocks configured.</p>
+        </div>
+
+    </div><!-- /ms-manage-grid -->
+    </div><!-- /u-tab-manage -->
 
 </div><!-- /content-primary -->
+
+<!-- ══════════════════════════════════════ MAL SEARCH MODAL -->
+<div id="u-malModal" class="ms-modal-backdrop">
+    <div class="ms-modal">
+        <button id="u-modalClose" class="ms-modal-close" type="button">✕</button>
+        <p id="u-modalTitle" class="ms-modal-title">Assign MAL ID</p>
+        <p id="u-modalSubtitle" style="font-size:.82em;opacity:.55;margin:-.6em 0 .9em"></p>
+
+        <!-- Current assignment -->
+        <div id="u-modalCurrentWrap">
+            <div style="font-size:.75em;opacity:.5;margin-bottom:.35em;font-weight:600;letter-spacing:.04em;text-transform:uppercase">
+                Current Assignment
+            </div>
+            <div id="u-modalCurrent" class="ms-current-mal">
+                <img id="u-modalCurrentImg" class="ms-current-mal-img" src="" alt=""
+                     style="display:none" />
+                <div id="u-modalCurrentImgPlaceholder"
+                     style="width:36px;height:50px;min-width:36px;flex-shrink:0;background:rgba(255,255,255,.06);border-radius:2px"></div>
+                <div class="ms-current-mal-info">
+                    <div class="ms-current-mal-title" id="u-modalCurrentTitle">Not assigned</div>
+                    <div class="ms-current-mal-id" id="u-modalCurrentId"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search -->
+        <div style="display:flex;gap:.5em;align-items:center;margin-bottom:.3em">
+            <input id="u-modalSearchInput" class="emby-input"
+                   type="search" placeholder="Search MAL…" style="margin:0;flex:1" />
+            <button id="u-modalSearchBtn" type="button" class="ms-btn ms-btn-primary" style="flex-shrink:0">
+                Search
+            </button>
+            <span id="u-modalSearchSpinner" class="ms-spinner"></span>
+        </div>
+        <div id="u-modalSearchResults" class="ms-search-results"></div>
+
+        <!-- Episode ranges section -->
+        <div id="u-rangesSection" style="margin-top:1em;padding-top:1em;border-top:1px solid rgba(255,255,255,.07)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5em">
+                <span style="font-size:.75em;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.45">
+                    Episode Ranges
+                </span>
+                <button id="u-rangesToggle" type="button"
+                        style="background:none;border:none;color:var(--accent-color,#00a4dc);font-size:.78em;cursor:pointer;opacity:.7;padding:0">
+                    ▶ Expand
+                </button>
+            </div>
+            <div id="u-rangesBody" style="display:none">
+                <div class="ms-hint" style="margin-bottom:.75em;font-size:.8em">
+                    For absolute-numbered shows where one Jellyfin season spans multiple MAL entries
+                    (e.g. Part 1 = Ep 1–14, Part 2 = Ep 15–26). Leave empty to use the standard single-ID mapping above.
+                </div>
+                <div id="u-rangesList"></div>
+                <div style="display:flex;gap:.5em;align-items:center;margin-top:.5em;flex-wrap:wrap">
+                    <button id="u-btnAddRange" type="button" class="ms-btn ms-btn-sm">+ Add Range</button>
+                    <button id="u-btnAutoDetect" type="button" class="ms-btn ms-btn-sm"
+                            title="Walk MAL sequel chain and auto-generate ranges">
+                        🔍 Auto-detect from MAL
+                    </button>
+                    <span id="u-autoDetectSpinner" class="ms-spinner"></span>
+                </div>
+
+                <!-- Inline range editor (hidden until Add/Edit clicked) -->
+                <div id="u-rangeEditor" style="display:none;margin-top:.75em;padding:.75em;background:rgba(255,255,255,.03);border-radius:5px;border:1px solid rgba(255,255,255,.08)">
+                    <div style="display:flex;gap:.6em;align-items:flex-end;margin-bottom:.6em;flex-wrap:wrap">
+                        <div>
+                            <label style="font-size:.72em;opacity:.5;display:block;margin-bottom:.2em">From ep</label>
+                            <input id="u-rangeFrom" type="number" min="1" class="emby-input"
+                                   style="width:5em;margin:0;padding:.3em .5em;font-size:.85em" value="1" />
+                        </div>
+                        <div>
+                            <label style="font-size:.72em;opacity:.5;display:block;margin-bottom:.2em">To ep (0=∞)</label>
+                            <input id="u-rangeTo" type="number" min="0" class="emby-input"
+                                   style="width:5em;margin:0;padding:.3em .5em;font-size:.85em" value="0" />
+                        </div>
+                        <div style="flex:1;min-width:120px">
+                            <label style="font-size:.72em;opacity:.5;display:block;margin-bottom:.2em">Search MAL</label>
+                            <div style="display:flex;gap:.4em">
+                                <input id="u-rangeSearch" class="emby-input" type="search"
+                                       style="margin:0;padding:.3em .5em;font-size:.85em;flex:1" placeholder="Title…" />
+                                <button id="u-rangeSearchBtn" type="button" class="ms-btn ms-btn-sm">Go</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Range search results -->
+                    <div id="u-rangeSearchResults" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:.45em;max-height:200px;overflow-y:auto;margin-bottom:.6em"></div>
+
+                    <!-- Selected MAL entry for range -->
+                    <div id="u-rangeSelectedWrap" style="display:none;align-items:center;gap:.6em;padding:.45em .65em;background:rgba(0,164,220,.08);border:1px solid rgba(0,164,220,.25);border-radius:4px;margin-bottom:.6em">
+                        <img id="u-rangeSelectedImg" style="width:28px;height:40px;object-fit:cover;border-radius:2px;flex-shrink:0" src="" alt="" />
+                        <div style="flex:1;min-width:0">
+                            <div id="u-rangeSelectedTitle" style="font-size:.82em;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+                            <div id="u-rangeSelectedId" style="font-size:.68em;opacity:.45"></div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:.4em">
+                        <button id="u-rangeSaveBtn" type="button" class="ms-btn ms-btn-primary ms-btn-sm" disabled>Save Range</button>
+                        <button id="u-rangeCancelBtn" type="button" class="ms-btn ms-btn-sm">Cancel</button>
+                    </div>
+                </div>
+
+                <div class="ms-btn-row" style="margin-top:.75em">
+                    <button id="u-saveRangesBtn" type="button" class="ms-btn ms-btn-primary ms-btn-sm">Save All Ranges</button>
+                    <button id="u-clearRangesBtn" type="button" class="ms-btn ms-btn-sm ms-btn-danger">Clear All Ranges</button>
+                    <span id="u-rangesSaveStatus" class="ms-save-status"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="ms-modal-actions">
+            <button id="u-modalPinBtn" type="button" class="ms-btn ms-btn-primary" disabled>
+                ✔ Pin Selected
+            </button>
+            <button id="u-modalBlockBtn" type="button" class="ms-btn ms-btn-danger">
+                ⊘ Block Sync
+            </button>
+            <button id="u-modalUnblockBtn" type="button" class="ms-btn ms-hidden">
+                ↺ Unblock Sync
+            </button>
+            <button id="u-modalClearBtn" type="button" class="ms-btn">
+                ✕ Clear Override
+            </button>
+            <button id="u-modalBlockImportBtn" type="button" class="ms-btn"
+                    title="Block the selected (or current) MAL ID from Jellyseerr import"
+                    style="border:1px solid rgba(220,53,69,.4);color:#ff8096">
+                ⊘ Block Import
+            </button>
+            <span id="u-modalStatus" class="ms-save-status" style="margin-left:auto"></span>
+        </div>
+    </div>
+</div>
 
 <script type="text/javascript">
 /* global ApiClient */
@@ -542,6 +1285,10 @@ window.MalSyncUser = (function () {
     function q(id) { return document.getElementById(id); }
 
     function logLine(container, text) {
+        // Remove placeholder on first real log line
+        var ph = container.querySelector('.ms-log-placeholder');
+        if (ph) ph.remove();
+
         const t = text ?? '';
         const info = classifyLogLine(t);
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -565,7 +1312,8 @@ window.MalSyncUser = (function () {
         row.appendChild(bEl);
         row.appendChild(msg);
         container.appendChild(row);
-        container.scrollTop = container.scrollHeight;
+
+        if (!container._userScrolled) container.scrollTop = container.scrollHeight;
     }
 
     function classifyLogLine(t) {
@@ -573,15 +1321,31 @@ window.MalSyncUser = (function () {
         if (t.startsWith('[SKIP]')) return { cls: 'log-warn', badge: 'SKIP' };
         if (t.startsWith('[MAL ERROR]') || t.startsWith('[ERROR]')) return { cls: 'log-err', badge: 'ERR' };
         if (t.startsWith('[DRY RUN]')) return { cls: 'log-warn', badge: 'DRY' };
+        if (t.startsWith('[WARN]')) return { cls: 'log-warn', badge: 'WARN' };
         if (t.startsWith('[MAL]')) return { cls: 'log-ok', badge: 'MAL' };
         if (t.startsWith('[DEBUG]') || t.startsWith('[DBG]')) return { cls: 'log-dbg', badge: 'DBG' };
-        if (t.startsWith('Sync complete.') || t.startsWith('Import complete.')) return { cls: 'log-ok', badge: 'DONE' };
+        if (t.startsWith('Sync complete.') || t.startsWith('Import complete.') || t.startsWith('Dry-run complete.')) return { cls: 'log-ok', badge: 'DONE' };
         return { cls: 'log-info', badge: 'INFO' };
     }
 
     async function init() {
         if (_initialized) return;
         _initialized = true;
+
+        // Expand Jellyfin's wrapping container so the page can use available width
+        (function () {
+            var el = document.getElementById('MalSyncUserPage');
+            if (!el) return;
+            var p = el.parentElement;
+            while (p && p !== document.body) {
+                p.style.setProperty('max-width', 'none', 'important');
+                p.style.setProperty('width', '100%', 'important');
+                var tag = p.tagName.toLowerCase();
+                if (tag === 'main' || p.classList.contains('scrollY') ||
+                    p.classList.contains('skinBody') || p.getAttribute('data-role') === 'page') break;
+                p = p.parentElement;
+            }
+        }());
 
         // ── Tab switching ──────────────────────────────────────────────
         document.querySelectorAll('.ms-tab').forEach(function (btn) {
@@ -601,11 +1365,14 @@ window.MalSyncUser = (function () {
         q('u-btnSync').addEventListener('click', function () { runSync(false); });
         q('u-btnDryRun').addEventListener('click', function () { runSync(true); });
         q('u-btnSaveUserConfig').addEventListener('click', saveUserConfig);
+        q('u-btnSaveWebhook').addEventListener('click', saveWebhook);
+        q('u-btnTestWebhook').addEventListener('click', testWebhook);
         q('u-btnAddProfile').addEventListener('click', function () { openProfileForm(null); });
         q('u-btnSaveProfile').addEventListener('click', saveProfile);
         q('u-btnCancelProfile').addEventListener('click', cancelProfileForm);
         q('u-btnImport').addEventListener('click', function () { runImport(false); });
         q('u-btnImportDry').addEventListener('click', function () { runImport(true); });
+        q('u-btnImportPreview').addEventListener('click', runImportPreview);
 
         q('u-profileList').addEventListener('click', function (e) {
             var btn = e.target.closest('button');
@@ -614,6 +1381,47 @@ window.MalSyncUser = (function () {
             if (btn.classList.contains('ms-btn-edit')) openProfileForm(id);
             if (btn.classList.contains('ms-btn-del')) deleteProfile(id);
         });
+
+        // ── Manage tab ─────────────────────────────────────────────
+        q('u-mgRefresh').addEventListener('click', loadSeriesList);
+        q('u-mgClearCache').addEventListener('click', clearCache);
+        q('u-mgClearRanges').addEventListener('click', clearAllRanges);
+        q('u-mgFilter').addEventListener('input', filterSeriesList);
+
+        // Status filter chips
+        document.querySelectorAll('.ms-filter-chip').forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                document.querySelectorAll('.ms-filter-chip').forEach(function (c) { c.classList.remove('active'); });
+                chip.classList.add('active');
+                _statusFilter = chip.dataset.filter;
+                filterSeriesList();
+            });
+        });
+        q('u-blockSearchBtn').addEventListener('click', function () { doBlockSearch(false); });
+        q('u-blockSearchInput').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') doBlockSearch(false);
+        });
+        q('u-modalClose').addEventListener('click', closeModal);
+        q('u-modalSearchBtn').addEventListener('click', function () { doModalSearch(false); });
+        q('u-modalSearchInput').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') doModalSearch();
+        });
+        q('u-modalPinBtn').addEventListener('click', pinSelected);
+        q('u-modalBlockBtn').addEventListener('click', blockSeason);
+        q('u-modalUnblockBtn').addEventListener('click', unblockSeason);
+        q('u-modalClearBtn').addEventListener('click', clearOverride);
+        q('u-modalBlockImportBtn').addEventListener('click', blockImport);
+
+        // Range editor
+        q('u-rangesToggle').addEventListener('click', toggleRangesSection);
+        q('u-btnAddRange').addEventListener('click', function () { openRangeEditor(null); });
+        q('u-btnAutoDetect').addEventListener('click', autoDetectRanges);
+        q('u-rangeSearchBtn').addEventListener('click', function () { doRangeSearch(false); });
+        q('u-rangeSearch').addEventListener('keydown', function (e) { if (e.key === 'Enter') doRangeSearch(); });
+        q('u-rangeSaveBtn').addEventListener('click', saveRangeEntry);
+        q('u-rangeCancelBtn').addEventListener('click', closeRangeEditor);
+        q('u-saveRangesBtn').addEventListener('click', saveAllRanges);
+        q('u-clearRangesBtn').addEventListener('click', clearSeasonRanges);
 
         await Promise.allSettled([refreshStatus(), loadAccountTitle(), loadUserConfig(), checkAdmin()]);
     }
@@ -641,9 +1449,140 @@ window.MalSyncUser = (function () {
             const cfg = await uJfGet('/MalSync/user/config');
             q('u-cfgNoDowngrade').checked = cfg.noDowngrade     ?? true;
             q('u-cfgJfWatched').checked   = cfg.jfUpdateWatched ?? false;
+            if (q('u-cfgWebhook'))       q('u-cfgWebhook').value         = cfg.webhookUrl          ?? '';
+            if (q('u-wh-stale'))         q('u-wh-stale').checked         = cfg.webhookOnStaleRanges   ?? true;
+            if (q('u-wh-errors'))        q('u-wh-errors').checked        = cfg.webhookOnSyncErrors    ?? false;
+            if (q('u-wh-summary'))       q('u-wh-summary').checked       = cfg.webhookOnSyncSummary   ?? false;
+            if (q('u-wh-imp-errors'))    q('u-wh-imp-errors').checked    = cfg.webhookOnImportErrors  ?? false;
+            if (q('u-wh-imp-summary'))   q('u-wh-imp-summary').checked   = cfg.webhookOnImportSummary ?? false;
             _profiles = cfg.jellyseerrProfiles ?? [];
             renderProfileList();
+            renderStaleNotices(cfg.staleRangeNotices ?? []);
         } catch (_) { /* non-fatal */ }
+    }
+
+    function renderStaleNotices(notices) {
+        // Update the Manage tab badge
+        var manageTab = document.querySelector('.ms-tab[data-tab="u-tab-manage"]');
+        if (manageTab) {
+            var existing = manageTab.querySelector('.ms-tab-badge');
+            if (existing) existing.remove();
+            if (notices.length > 0) {
+                var badge = document.createElement('span');
+                badge.className = 'ms-tab-badge';
+                badge.textContent = notices.length;
+                manageTab.appendChild(badge);
+            }
+        }
+
+        var wrap = q('u-staleNotices');
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        notices.forEach(function (n) {
+            var div = document.createElement('div');
+            div.className = 'ms-notice';
+            var when = n.detectedAt ? new Date(n.detectedAt).toLocaleDateString() : '';
+            div.innerHTML =
+                '<span class="ms-notice-icon">⚠</span>' +
+                '<div class="ms-notice-body">' +
+                '  <div class="ms-notice-title">Ranges may be outdated</div>' +
+                '  <div class="ms-notice-text">' +
+                    escHtml(n.jellyfinSeriesName || '') + (n.seasonNumber ? ' — S' + n.seasonNumber : '') +
+                    ': Jellyfin has more episodes than <em>' + escHtml(n.malTitle) + '</em> covers on MAL.' +
+                    ' A new part may be available.' +
+                    (when ? ' <span style="opacity:.5;font-size:.9em">(' + when + ')</span>' : '') +
+                '  </div>' +
+                '  <div class="ms-notice-actions">' +
+                '    <button class="ms-btn ms-btn-sm ms-btn-primary ms-notice-edit" ' +
+                       'data-sid="' + escHtml(n.jellyfinSeriesId) + '" ' +
+                       'data-snum="' + n.seasonNumber + '">↺ Re-run Auto-Detect</button>' +
+                '    <button class="ms-notice-dismiss ms-notice-dismiss-btn" ' +
+                       'data-sid="' + escHtml(n.jellyfinSeriesId) + '" ' +
+                       'data-snum="' + n.seasonNumber + '">Dismiss</button>' +
+                '  </div>' +
+                '</div>';
+            wrap.appendChild(div);
+        });
+
+        // Dismiss buttons
+        wrap.querySelectorAll('.ms-notice-dismiss-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var sid  = btn.dataset.sid;
+                var snum = parseInt(btn.dataset.snum);
+                btn.closest('.ms-notice').remove();
+                uJfPost('/MalSync/user/notices/dismiss', { jellyfinSeriesId: sid, seasonNumber: snum })
+                    .catch(function () {});
+                // Update tab badge to reflect remaining count
+                var remaining = wrap.querySelectorAll('.ms-notice').length;
+                var manageTab = document.querySelector('.ms-tab[data-tab="u-tab-manage"]');
+                if (manageTab) {
+                    var b = manageTab.querySelector('.ms-tab-badge');
+                    if (remaining > 0) { if (b) b.textContent = remaining; }
+                    else { if (b) b.remove(); }
+                }
+            });
+        });
+
+        // "Auto-Detect aktualisieren" → scroll to Manage tab, load series, then open modal
+        wrap.querySelectorAll('.ms-notice-edit').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var sid  = btn.dataset.sid;
+                var snum = parseInt(btn.dataset.snum);
+                // Switch to Manage tab
+                document.querySelectorAll('.ms-tab').forEach(function (t) { t.classList.remove('active'); });
+                document.querySelectorAll('.ms-tab-panel').forEach(function (p) { p.classList.remove('active'); });
+                var manageBtn = document.querySelector('.ms-tab[data-tab="u-tab-manage"]');
+                if (manageBtn) manageBtn.classList.add('active');
+                var managePanel = q('u-tab-manage');
+                if (managePanel) managePanel.classList.add('active');
+
+                // Load series then open the right edit modal
+                loadSeriesList().then(function () {
+                    var series = _seriesData.find(function (s) { return s.jellyfinSeriesId === sid; });
+                    if (!series) return;
+                    var season = (series.seasons || []).find(function (s) { return s.seasonNumber === snum; });
+                    if (season) openModal(series, season);
+                });
+            });
+        });
+    }
+
+    async function saveWebhook() {
+        var status = q('u-webhookStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/user/config', {
+                webhookUrl:            (q('u-cfgWebhook').value || '').trim(),
+                webhookOnStaleRanges:  q('u-wh-stale')       ? q('u-wh-stale').checked       : undefined,
+                webhookOnSyncErrors:   q('u-wh-errors')      ? q('u-wh-errors').checked      : undefined,
+                webhookOnSyncSummary:  q('u-wh-summary')     ? q('u-wh-summary').checked     : undefined,
+                webhookOnImportErrors: q('u-wh-imp-errors')  ? q('u-wh-imp-errors').checked  : undefined,
+                webhookOnImportSummary:q('u-wh-imp-summary') ? q('u-wh-imp-summary').checked : undefined,
+            });
+            status.textContent = '✔ Saved';
+            status.style.color = '#74c69d';
+        } catch (e) {
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error');
+            status.style.color = '#e76f51';
+        }
+        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 3000);
+    }
+
+    async function testWebhook() {
+        var status = q('u-webhookStatus');
+        var btn = q('u-btnTestWebhook');
+        btn.disabled = true;
+        status.textContent = 'Sending…';
+        try {
+            await uJfPost('/MalSync/user/webhook/test', {});
+            status.textContent = '✔ Test sent!';
+            status.style.color = '#74c69d';
+        } catch (e) {
+            status.textContent = '✖ ' + (e.responseJSON?.error ?? e.message ?? 'Error');
+            status.style.color = '#e76f51';
+        }
+        btn.disabled = false;
+        setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 4000);
     }
 
     async function saveUserConfig() {
@@ -882,8 +1821,14 @@ window.MalSyncUser = (function () {
         const btnDry  = q('u-btnDryRun');
         const debug   = q('u-cfgDebug') && q('u-cfgDebug').checked;
 
-        logDiv.innerHTML = '';
-        logDiv.classList.remove('ms-hidden');
+        logDiv.innerHTML = '<div class="ms-log-placeholder">Connecting…</div>';
+        logDiv._userScrolled = false;
+        if (!logDiv._scrollListenerAdded) {
+            logDiv._scrollListenerAdded = true;
+            logDiv.addEventListener('scroll', function () {
+                logDiv._userScrolled = (logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight) > 5;
+            }, { passive: true });
+        }
         spinner.classList.add('active');
         btnSync.disabled = btnDry.disabled = true;
 
@@ -919,7 +1864,6 @@ window.MalSyncUser = (function () {
         } finally {
             spinner.classList.remove('active');
             btnSync.disabled = btnDry.disabled = false;
-            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
@@ -930,8 +1874,17 @@ window.MalSyncUser = (function () {
         const btnImp  = q('u-btnImport');
         const btnDry  = q('u-btnImportDry');
 
-        logDiv.innerHTML = '';
+        // Ensure log is visible and preview is hidden when running import/dry-run
         logDiv.classList.remove('ms-hidden');
+        q('u-importPreviewWrap').classList.add('ms-hidden');
+        logDiv.innerHTML = '<div class="ms-log-placeholder">Connecting…</div>';
+        logDiv._userScrolled = false;
+        if (!logDiv._scrollListenerAdded) {
+            logDiv._scrollListenerAdded = true;
+            logDiv.addEventListener('scroll', function () {
+                logDiv._userScrolled = (logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight) > 5;
+            }, { passive: true });
+        }
         spinner.classList.add('active');
         btnImp.disabled = btnDry.disabled = true;
 
@@ -967,9 +1920,1370 @@ window.MalSyncUser = (function () {
         } finally {
             spinner.classList.remove('active');
             btnImp.disabled = btnDry.disabled = false;
-            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
+
+    // ── Import preview (SSE streaming) ────────────────────────────────
+    function buildPreviewCard(item) {
+        var card = document.createElement('div');
+        card.style.cssText = 'background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);' +
+            'border-radius:5px;overflow:hidden;position:relative';
+
+        var imgWrap = document.createElement('div');
+        imgWrap.style.cssText = 'width:100%;aspect-ratio:7/10;background:rgba(255,255,255,.06);overflow:hidden';
+        if (item.malImageUrl) {
+            var img = document.createElement('img');
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block';
+            img.src = item.malImageUrl;
+            img.alt = '';
+            imgWrap.appendChild(img);
+        }
+        card.appendChild(imgWrap);
+
+        var info = document.createElement('div');
+        info.style.cssText = 'padding:.4em .5em';
+        var titleEl = document.createElement('div');
+        titleEl.style.cssText = 'font-size:.72em;font-weight:600;line-height:1.3;' +
+            'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
+        titleEl.textContent = item.malTitle;
+        info.appendChild(titleEl);
+        var meta = document.createElement('div');
+        meta.style.cssText = 'font-size:.65em;opacity:.45;margin-top:.15em';
+        meta.textContent = item.requestAllSeasons ? 'All seasons' : ('S' + (item.seasonNumber ?? '?'));
+        info.appendChild(meta);
+        card.appendChild(info);
+
+        var blockBtn = document.createElement('button');
+        blockBtn.type = 'button';
+        blockBtn.title = 'Block from future imports';
+        blockBtn.style.cssText = 'position:absolute;top:.3em;right:.3em;background:rgba(220,53,69,.85);' +
+            'color:#fff;border:none;border-radius:3px;padding:.15em .45em;font-size:.7em;font-weight:700;' +
+            'cursor:pointer;display:none;line-height:1.4';
+        blockBtn.textContent = '⊘';
+        blockBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            quickBlockImport(item.malId, item.malTitle, card, blockBtn);
+        });
+        card.appendChild(blockBtn);
+
+        card.addEventListener('mouseenter', function (e) {
+            blockBtn.style.display = '';
+            showTip({ title: item.malTitle, status: item.malStatus }, e);
+        });
+        card.addEventListener('mousemove', moveTip);
+        card.addEventListener('mouseleave', function () {
+            blockBtn.style.display = 'none';
+            hideTip();
+        });
+
+        return card;
+    }
+
+    async function runImportPreview() {
+        var wrap = q('u-importPreviewWrap');
+        var grid = q('u-importPreviewGrid');
+        var spinner = q('u-importSpinner');
+        var btn = q('u-btnImportPreview');
+        var progressWrap = q('u-previewProgressWrap');
+        var progressBar = q('u-previewProgressBar');
+        var progressLabel = q('u-previewProgressLabel');
+        var resultsHeader = q('u-previewResultsHeader');
+
+        // Reset UI
+        grid.innerHTML = '';
+        wrap.classList.remove('ms-hidden');
+        q('u-importLog').classList.add('ms-hidden');
+        progressWrap.style.display = '';
+        progressBar.style.width = '0%';
+        progressLabel.textContent = '';
+        resultsHeader.style.display = 'none';
+        spinner.classList.add('active');
+        btn.disabled = true;
+
+        var itemCount = 0;
+
+        try {
+            var url = _uJfBase() + '/MalSync/import/preview/stream';
+            var response = await fetch(url, { headers: _uJfHeaders() });
+            if (!response.ok) {
+                grid.innerHTML = '<div style="color:#ff6b6b;font-size:.85em;grid-column:1/-1">' +
+                    'Preview failed: HTTP ' + response.status + '</div>';
+                return;
+            }
+
+            var reader = response.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+
+            outer: while (true) {
+                var chunk = await reader.read();
+                if (chunk.done) break;
+                buffer += decoder.decode(chunk.value, { stream: true });
+                var idx;
+                while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                    var line = buffer.slice(0, idx);
+                    buffer = buffer.slice(idx + 2);
+                    if (!line.startsWith('data: ')) continue;
+                    var text = line.slice(6);
+
+                    if (text === '[DONE]') { break outer; }
+
+                    if (text.startsWith('PROGRESS:')) {
+                        var parts = text.slice(9).split('/');
+                        var cur = parseInt(parts[0]);
+                        var tot = parseInt(parts[1]);
+                        var pct = tot > 0 ? Math.round(cur / tot * 100) : 0;
+                        progressBar.style.width = pct + '%';
+                        progressLabel.textContent = cur + ' / ' + tot;
+                        if (cur > 0 && resultsHeader.style.display === 'none') {
+                            resultsHeader.style.display = '';
+                        }
+                    } else if (text.startsWith('ITEM:')) {
+                        try {
+                            var item = JSON.parse(text.slice(5));
+                            grid.appendChild(buildPreviewCard(item));
+                            itemCount++;
+                        } catch (_) {}
+                    }
+                }
+            }
+
+            if (itemCount === 0) {
+                grid.innerHTML = '<div style="opacity:.4;font-size:.85em;grid-column:1/-1;padding:.4em 0">' +
+                    'Nothing to import — all matching entries are already in Jellyseerr.</div>';
+            }
+        } catch (e) {
+            grid.innerHTML = '<div style="color:#ff6b6b;font-size:.85em;grid-column:1/-1">Preview failed: ' +
+                escHtml(e.message || 'Unknown error') + '</div>';
+        } finally {
+            spinner.classList.remove('active');
+            btn.disabled = false;
+            progressWrap.style.display = 'none';
+            if (itemCount > 0) {
+                progressLabel.textContent = itemCount + ' item(s) would be requested';
+                progressWrap.style.display = '';
+                progressBar.style.width = '100%';
+            }
+        }
+    }
+
+    async function quickBlockImport(malId, malTitle, card, btn) {
+        if (!confirm('Block "' + malTitle + '" from all future imports?')) return;
+        btn.textContent = '…';
+        try {
+            await uJfPost('/MalSync/import/block', { malId: malId, malTitle: malTitle });
+            // Mark card as blocked visually
+            card.style.opacity = '.35';
+            card.style.filter = 'grayscale(1)';
+            btn.style.display = 'none';
+            var badge = document.createElement('div');
+            badge.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;' +
+                'justify-content:center;background:rgba(220,53,69,.25);font-size:.72em;' +
+                'font-weight:700;color:#ff8096;letter-spacing:.05em;pointer-events:none';
+            badge.textContent = 'BLOCKED';
+            card.appendChild(badge);
+            renderImportBlocks();
+        } catch (e) {
+            btn.textContent = '⊘';
+            alert('Error: ' + (e.message || 'Could not block'));
+        }
+    }
+
+    // ── Episode Range Editor ──────────────────────────────────────────
+    async function autoDetectRanges() {
+        // Need a MAL ID to start from
+        var startId = _modal.selectedMalId;
+
+        // Fall back to the season's current MAL ID
+        if (!startId) {
+            var currentIdText = q('u-modalCurrentId').textContent || '';
+            var match = currentIdText.match(/ID:\s*(\d+)/);
+            if (match) startId = match[1];
+        }
+
+        if (!startId) {
+            alert('No MAL ID available to detect from.\nFirst search for and select the first part/season of this series, then click Auto-detect.');
+            return;
+        }
+
+        var btn = q('u-btnAutoDetect');
+        var spinner = q('u-autoDetectSpinner');
+        btn.disabled = true;
+        spinner.classList.add('active');
+        q('u-rangesBody').style.display = ''; // make sure section is open
+
+        try {
+            var data = await uJfGet('/MalSync/series/ranges/detect?malId=' + encodeURIComponent(startId) +
+                '&jellyfinSeriesId=' + encodeURIComponent(_modal.seriesId) +
+                '&seasonNumber=' + _modal.seasonNum);
+            var ranges = data.ranges || [];
+
+            if (!ranges.length) {
+                alert('No sequel chain found in MAL. This series may not have multi-part entries, or the episode counts are unknown.');
+                return;
+            }
+
+            if (ranges.length === 1) {
+                alert('Only one MAL entry found in the chain — no ranges needed. This season maps to a single MAL entry.');
+                return;
+            }
+
+            // Show a preview with confirm
+            var preview = ranges.map(function (r) {
+                var to = r.episodeTo === 0 ? '∞' : r.episodeTo;
+                return 'Ep ' + r.episodeFrom + '–' + to + ': ' + (r.malTitle || r.malId);
+            }).join('\n');
+
+            if (!confirm('Auto-detected ' + ranges.length + ' parts from MAL sequel chain:\n\n' + preview + '\n\nApply these ranges?\n(This will replace any existing ranges.)')) {
+                return;
+            }
+
+            _modal.ranges = ranges.map(function (r) { return Object.assign({}, r); });
+            renderRangesList();
+            q('u-rangesToggle').textContent = '▼ Collapse (' + _modal.ranges.length + ' ranges)';
+        } catch (e) {
+            alert('Auto-detect failed: ' + (e.message || 'Unknown error'));
+        } finally {
+            btn.disabled = false;
+            spinner.classList.remove('active');
+        }
+    }
+
+    function toggleRangesSection() {
+        var body = q('u-rangesBody');
+        var btn = q('u-rangesToggle');
+        var open = body.style.display !== 'none';
+        body.style.display = open ? 'none' : '';
+        btn.textContent = (open ? '▶ Expand' : '▼ Collapse') +
+            (_modal.ranges.length ? ' (' + _modal.ranges.length + ' ranges)' : '');
+    }
+
+    function renderRangesList() {
+        var list = q('u-rangesList');
+        list.innerHTML = '';
+        if (!_modal.ranges.length) {
+            list.innerHTML = '<div style="font-size:.8em;opacity:.35;margin-bottom:.4em">No ranges defined. Standard single-MAL mapping is used.</div>';
+            return;
+        }
+        _modal.ranges.forEach(function (r) {
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:.5em;padding:.4em .6em;' +
+                'margin-bottom:.3em;background:rgba(255,255,255,.03);border-radius:4px;' +
+                'border:1px solid rgba(255,255,255,.06)';
+
+            var epLabel = document.createElement('span');
+            epLabel.style.cssText = 'font-size:.75em;font-weight:700;opacity:.6;flex-shrink:0;min-width:70px';
+            epLabel.textContent = 'Ep ' + r.episodeFrom + '–' + (r.episodeTo === 0 ? '∞' : r.episodeTo);
+            row.appendChild(epLabel);
+
+            if (r.malImageUrl) {
+                var img = document.createElement('img');
+                img.style.cssText = 'width:22px;height:31px;object-fit:cover;border-radius:2px;flex-shrink:0';
+                img.src = r.malImageUrl;
+                img.alt = '';
+                row.appendChild(img);
+            }
+
+            var info = document.createElement('div');
+            info.style.cssText = 'flex:1;min-width:0;font-size:.8em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+            info.textContent = r.malTitle || ('MAL ID ' + r.malId);
+            row.appendChild(info);
+
+            var editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'ms-btn ms-btn-sm';
+            editBtn.textContent = 'Edit';
+            editBtn.style.flexShrink = '0';
+            editBtn.addEventListener('click', function () { openRangeEditor(r.id); });
+            row.appendChild(editBtn);
+
+            var delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'ms-btn ms-btn-sm ms-btn-danger';
+            delBtn.textContent = '✕';
+            delBtn.style.cssText = 'flex-shrink:0;min-width:0;padding:.3em .5em';
+            delBtn.addEventListener('click', function () {
+                _modal.ranges = _modal.ranges.filter(function (x) { return x.id !== r.id; });
+                renderRangesList();
+                q('u-rangesToggle').textContent = '▼ Collapse' +
+                    (_modal.ranges.length ? ' (' + _modal.ranges.length + ' ranges)' : '');
+            });
+            row.appendChild(delBtn);
+            list.appendChild(row);
+        });
+    }
+
+    function openRangeEditor(rangeId) {
+        _modal.editingRangeId = rangeId;
+        _modal.rangeSelectedMalId = null;
+        _modal.rangeSelectedMalTitle = null;
+        _modal.rangeSelectedMalImage = null;
+
+        q('u-rangeSearchResults').innerHTML = '';
+        q('u-rangeSelectedWrap').style.display = 'none';
+        q('u-rangeSaveBtn').disabled = true;
+        _rangeSearchOffset = 0;
+
+        if (rangeId) {
+            var existing = _modal.ranges.find(function (r) { return r.id === rangeId; });
+            if (existing) {
+                q('u-rangeFrom').value = existing.episodeFrom;
+                q('u-rangeTo').value = existing.episodeTo;
+                q('u-rangeSearch').value = existing.malTitle || '';
+                if (existing.malId) {
+                    _modal.rangeSelectedMalId = existing.malId;
+                    _modal.rangeSelectedMalTitle = existing.malTitle;
+                    _modal.rangeSelectedMalImage = existing.malImageUrl;
+                    showRangeSelected(existing.malId, existing.malTitle, existing.malImageUrl);
+                    q('u-rangeSaveBtn').disabled = false;
+                }
+            }
+        } else {
+            // suggest next range start
+            var lastTo = _modal.ranges.length > 0
+                ? Math.max.apply(null, _modal.ranges.map(function (r) { return r.episodeTo; }))
+                : 0;
+            q('u-rangeFrom').value = lastTo > 0 ? lastTo + 1 : 1;
+            q('u-rangeTo').value = 0;
+            q('u-rangeSearch').value = '';
+        }
+
+        q('u-rangeEditor').style.display = '';
+        q('u-rangeEditor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function closeRangeEditor() {
+        q('u-rangeEditor').style.display = 'none';
+        q('u-rangeSearchResults').innerHTML = '';
+        _modal.editingRangeId = null;
+    }
+
+    function showRangeSelected(malId, malTitle, malImageUrl) {
+        var wrap = q('u-rangeSelectedWrap');
+        var img = q('u-rangeSelectedImg');
+        var titleEl = q('u-rangeSelectedTitle');
+        var idEl = q('u-rangeSelectedId');
+        titleEl.textContent = malTitle || ('MAL ID ' + malId);
+        idEl.textContent = 'ID: ' + malId;
+        if (malImageUrl) { img.src = malImageUrl; img.style.display = ''; }
+        else img.style.display = 'none';
+        wrap.style.display = 'flex';
+    }
+
+    async function doRangeSearch(append) {
+        var query = q('u-rangeSearch').value.trim();
+        if (!query) return;
+        var offset = append ? (_rangeSearchOffset + 12) : 0;
+        _rangeSearchOffset = offset;
+        var resultsDiv = q('u-rangeSearchResults');
+        if (!append) {
+            resultsDiv.innerHTML = '<div style="opacity:.4;font-size:.8em;padding:.3em">Searching…</div>';
+        } else {
+            var lm = resultsDiv.querySelector('.ms-load-more-wrap');
+            if (lm) lm.remove();
+        }
+        q('u-rangeSearchBtn').disabled = true;
+        try {
+            var data = await uJfGet('/MalSync/mal/search?q=' + encodeURIComponent(query) + '&offset=' + offset);
+            if (!append) resultsDiv.innerHTML = '';
+            (data.results || []).forEach(function (r) {
+                var card = document.createElement('div');
+                card.style.cssText = 'background:rgba(255,255,255,.04);border:2px solid transparent;' +
+                    'border-radius:4px;cursor:pointer;overflow:hidden;transition:border-color .12s';
+                var img = document.createElement('img');
+                img.style.cssText = 'width:100%;aspect-ratio:7/10;object-fit:cover;display:block;background:rgba(255,255,255,.06)';
+                img.src = r.imageUrl || '';
+                img.alt = '';
+                card.appendChild(img);
+                var lbl = document.createElement('div');
+                lbl.style.cssText = 'font-size:.65em;padding:.25em .35em;line-height:1.3;' +
+                    'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden';
+                lbl.textContent = r.englishTitle || r.title;
+                card.appendChild(lbl);
+                card.addEventListener('mouseenter', function () { card.style.borderColor = 'rgba(0,164,220,.5)'; });
+                card.addEventListener('mouseleave', function () {
+                    if (_modal.rangeSelectedMalId !== r.malId) card.style.borderColor = 'transparent';
+                });
+                card.addEventListener('click', function () {
+                    resultsDiv.querySelectorAll('div').forEach(function (c) { c.style.borderColor = 'transparent'; });
+                    card.style.borderColor = 'var(--accent-color,#00a4dc)';
+                    _modal.rangeSelectedMalId = r.malId;
+                    _modal.rangeSelectedMalTitle = r.englishTitle || r.title;
+                    _modal.rangeSelectedMalImage = r.imageUrl || null;
+                    showRangeSelected(r.malId, _modal.rangeSelectedMalTitle, _modal.rangeSelectedMalImage);
+                    q('u-rangeSaveBtn').disabled = false;
+                });
+                card.addEventListener('mouseenter', function (e) { showTip(r, e); });
+                card.addEventListener('mousemove', moveTip);
+                card.addEventListener('mouseleave', hideTip);
+                resultsDiv.appendChild(card);
+            });
+            if ((data.results || []).length >= 12) {
+                var wrap = document.createElement('div');
+                wrap.className = 'ms-load-more-wrap';
+                wrap.style.cssText = 'grid-column:1/-1;text-align:center;padding:.4em 0 0';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ms-btn ms-btn-sm';
+                btn.textContent = 'Load More';
+                btn.addEventListener('click', function () { doRangeSearch(true); });
+                wrap.appendChild(btn);
+                resultsDiv.appendChild(wrap);
+            }
+        } catch (e) {
+            if (!append) resultsDiv.innerHTML = '<div style="color:#ff6b6b;font-size:.8em">Search failed.</div>';
+        } finally {
+            q('u-rangeSearchBtn').disabled = false;
+        }
+    }
+
+    function saveRangeEntry() {
+        if (!_modal.rangeSelectedMalId) return;
+        var from = parseInt(q('u-rangeFrom').value) || 1;
+        var to = parseInt(q('u-rangeTo').value) || 0;
+        if (from < 1) from = 1;
+        if (to < 0) to = 0;
+
+        var entry = {
+            id: _modal.editingRangeId || ('r' + Date.now()),
+            episodeFrom: from,
+            episodeTo: to,
+            malId: _modal.rangeSelectedMalId,
+            malTitle: _modal.rangeSelectedMalTitle,
+            malImageUrl: _modal.rangeSelectedMalImage,
+        };
+
+        if (_modal.editingRangeId) {
+            var idx = _modal.ranges.findIndex(function (r) { return r.id === _modal.editingRangeId; });
+            if (idx >= 0) _modal.ranges[idx] = entry; else _modal.ranges.push(entry);
+        } else {
+            _modal.ranges.push(entry);
+        }
+        _modal.ranges.sort(function (a, b) { return a.episodeFrom - b.episodeFrom; });
+        closeRangeEditor();
+        renderRangesList();
+        q('u-rangesToggle').textContent = '▼ Collapse (' + _modal.ranges.length + ' ranges)';
+    }
+
+    async function saveAllRanges() {
+        var status = q('u-rangesSaveStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/series/ranges', {
+                jellyfinSeriesId: _modal.seriesId,
+                jellyfinSeriesName: _modal.seriesName,
+                seasonNumber: _modal.seasonNum,
+                ranges: _modal.ranges,
+            });
+            status.textContent = '✔ Saved';
+            status.style.color = '#74c69d';
+            setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 2000);
+            loadSeriesList();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    async function clearSeasonRanges() {
+        if (!confirm('Remove all episode range mappings for this season?')) return;
+        _modal.ranges = [];
+        renderRangesList();
+        await saveAllRanges();
+        q('u-rangesToggle').textContent = '▶ Expand';
+    }
+
+    // ── Cache reset for single season ─────────────────────────────────
+    async function resetSeasonCache(seriesName, seasonNumber, btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+            await uJfPost('/MalSync/cache/clear', {
+                seriesName: seriesName,
+                seasonNumber: seasonNumber,
+            });
+            loadSeriesList();
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = '↺';
+            alert('Error: ' + (e.message || 'Could not reset cache'));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // HOVER TOOLTIP
+    // ═══════════════════════════════════════════════════════════════════
+
+    var _tipEl = null;
+
+    function getTip() {
+        if (!_tipEl || !_tipEl.isConnected) {
+            _tipEl = document.getElementById('ms-hover-tooltip');
+            if (!_tipEl) {
+                // Lazy-create if Jellyfin SPA removed it
+                _tipEl = document.createElement('div');
+                _tipEl.id = 'ms-hover-tooltip';
+                document.body.appendChild(_tipEl);
+            }
+        }
+        return _tipEl;
+    }
+
+    function showTip(data, event) {
+        var tip = getTip();
+        if (!tip) return;
+
+        var hasAfterDivider = (data.genres && data.genres.length) ||
+            data.startSeason || data.mediaType || data.numEpisodes || data.status ||
+            data.malId || (data.episodeRanges && data.episodeRanges.length);
+
+        var textHtml = '';
+
+        // Title (always shown)
+        textHtml += '<div class="tip-title">' + escHtml(data.title || '') + '</div>';
+
+        // English title if different
+        if (data.englishTitle && data.englishTitle !== data.title) {
+            textHtml += '<div class="tip-alt">' + escHtml(data.englishTitle) + '</div>';
+        }
+
+        // Synonyms
+        if (data.synonyms && data.synonyms.length) {
+            textHtml += '<div class="tip-alt" style="font-size:.8em;opacity:.45">' +
+                data.synonyms.slice(0, 2).map(escHtml).join(' · ') + '</div>';
+        }
+
+        if (hasAfterDivider) textHtml += '<hr class="tip-divider" />';
+
+        // Genres
+        if (data.genres && data.genres.length) {
+            textHtml += '<div class="tip-genres">' + data.genres.slice(0, 5).map(escHtml).join(', ') + '</div>';
+        }
+
+        // Meta: season · type · episodes · status
+        var metaParts = [];
+        if (data.startSeason) metaParts.push(data.startSeason);
+        if (data.mediaType) metaParts.push(data.mediaType.toUpperCase());
+        if (data.numEpisodes) metaParts.push(data.numEpisodes + ' ep');
+        if (data.status) {
+            var st = data.status.replace(/_/g, ' ');
+            if (st !== 'finished airing') metaParts.push(st);
+        }
+        if (metaParts.length) {
+            textHtml += '<div class="tip-meta">' + metaParts.join(' · ') + '</div>';
+        }
+
+        // MAL ID + source (series list hover)
+        if (data.malId) {
+            var srcLabel = data.source === 'pinned' ? 'Pinned' :
+                           data.source === 'provider' ? 'Provider' :
+                           data.source === 'cache' ? 'Cache' : '';
+            textHtml += '<div class="tip-meta">MAL ' + escHtml(String(data.malId)) +
+                (srcLabel ? ' · ' + escHtml(srcLabel) : '') + '</div>';
+        }
+
+        // Episode ranges (series list hover)
+        if (data.episodeRanges && data.episodeRanges.length) {
+            var rangeLines = data.episodeRanges.slice(0, 5).map(function (r) {
+                var to = r.episodeTo === 0 ? '∞' : r.episodeTo;
+                return 'Ep ' + r.episodeFrom + '–' + to + ': ' + escHtml(r.malTitle || 'MAL ' + r.malId);
+            });
+            if (data.episodeRanges.length > 5) rangeLines.push('…+' + (data.episodeRanges.length - 5) + ' more');
+            textHtml += '<div class="tip-meta" style="margin-top:.3em;line-height:1.65">' +
+                rangeLines.join('<br>') + '</div>';
+        }
+
+        var html = '';
+        if (data.imageUrl) {
+            html = '<div class="tip-layout">' +
+                '<img class="tip-img" src="' + escHtml(data.imageUrl) + '" alt="" />' +
+                '<div class="tip-content">' + textHtml + '</div>' +
+                '</div>';
+        } else {
+            html = textHtml;
+        }
+
+        tip.innerHTML = html;
+        tip.style.display = 'block';
+        if (event) moveTip(event);
+    }
+
+    var _lastTipEvent = null;
+
+    function moveTip(event) {
+        _lastTipEvent = event;
+        var tip = getTip();
+        if (!tip || tip.style.display === 'none') return;
+        var x = event.clientX + 16;
+        var y = event.clientY - 8;
+        var w = 240;
+        var h = tip.offsetHeight || 120;
+        if (x + w > window.innerWidth - 10) x = event.clientX - w - 8;
+        if (y + h > window.innerHeight - 10) y = window.innerHeight - h - 12;
+        tip.style.left = x + 'px';
+        tip.style.top = y + 'px';
+    }
+
+    function hideTip() {
+        var tip = getTip();
+        if (tip) tip.style.display = 'none';
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MANAGE TAB
+    // ═══════════════════════════════════════════════════════════════════
+
+    var _seriesData = [];
+    var _statusFilter = 'all';
+    var _tipCache = {};  // malId → full MAL details (cached per session)
+    var _modal = {
+        seriesId: '',
+        seriesName: '',
+        seasonNum: 0,
+        selectedMalId: null,
+        selectedMalTitle: null,
+        selectedMalImage: null,
+        isBlocked: false,
+        ranges: [],
+        editingRangeId: null,
+        rangeSelectedMalId: null,
+        rangeSelectedMalTitle: null,
+        rangeSelectedMalImage: null,
+        searchOffset: 0,       // pagination offset for modal MAL search
+    };
+    var _rangeSearchOffset = 0;   // pagination offset for range editor search
+    var _blockSearchOffset = 0;   // pagination offset for block search
+
+    async function loadSeriesList() {
+        var listDiv = q('u-mgList');
+        var loading = q('u-mgLoading');
+        listDiv.innerHTML = '';
+        loading.classList.remove('ms-hidden');
+        loading.style.display = '';
+
+        try {
+            var data = await uJfGet('/MalSync/series');
+            _seriesData = data.series || [];
+            loading.style.display = 'none';
+            filterSeriesList();   // re-applies current filter value
+            renderImportBlocks();
+        } catch (e) {
+            loading.textContent = 'Failed to load series: ' + (e.message || 'Unknown error');
+        }
+    }
+
+    function seriesMatchesStatusFilter(s) {
+        if (_statusFilter === 'all') return true;
+        var seasons = s.seasons || [];
+        if (_statusFilter === 'pinned')  return seasons.some(function (x) { return x.pinned; });
+        if (_statusFilter === 'blocked') return seasons.some(function (x) { return x.blocked; });
+        if (_statusFilter === 'nomatch') return seasons.some(function (x) { return !x.malId && !x.blocked; });
+        return true;
+    }
+
+    function filterSeriesList() {
+        var term = q('u-mgFilter').value.trim().toLowerCase();
+        var filtered = _seriesData.filter(function (s) {
+            var textOk = !term || (s.jellyfinSeriesName || '').toLowerCase().includes(term);
+            return textOk && seriesMatchesStatusFilter(s);
+        });
+        renderSeriesList(filtered);
+    }
+
+    function renderSeriesList(items) {
+        var listDiv = q('u-mgList');
+        listDiv.innerHTML = '';
+
+        if (!items.length) {
+            listDiv.innerHTML = '<div class="ms-series-empty">No anime series found in configured library paths.</div>';
+            return;
+        }
+
+        items.forEach(function (series) {
+            var row = document.createElement('div');
+            row.className = 'ms-series-row';
+
+            // Poster
+            var posterWrap = document.createElement('div');
+            var img = document.createElement('img');
+            img.className = 'ms-series-poster';
+            img.src = series.posterUrl || '';
+            img.alt = '';
+            img.onerror = function () {
+                posterWrap.innerHTML = '<div class="ms-series-poster-placeholder">◻</div>';
+            };
+            posterWrap.appendChild(img);
+            row.appendChild(posterWrap);
+
+            // Info
+            var info = document.createElement('div');
+            info.className = 'ms-series-info';
+
+            var nameDiv = document.createElement('div');
+            nameDiv.className = 'ms-series-name';
+            nameDiv.title = series.jellyfinSeriesName || '';
+            nameDiv.textContent = series.jellyfinSeriesName || 'Unknown';
+            info.appendChild(nameDiv);
+
+            (series.seasons || []).forEach(function (season) {
+                info.appendChild(buildSeasonRow(series, season));
+            });
+
+            row.appendChild(info);
+            listDiv.appendChild(row);
+        });
+    }
+
+    function buildSeasonRow(series, season) {
+        var row = document.createElement('div');
+        row.className = 'ms-season-row';
+
+        // Season number badge
+        var numBadge = document.createElement('span');
+        numBadge.className = 'ms-season-num' + (season.isSpecial ? ' ms-badge-special' : '');
+        numBadge.textContent = season.isSpecial ? 'SP' : ('S' + season.seasonNumber);
+        if (season.isSpecial) numBadge.title = 'Specials / Season 0 — synced only if manually pinned';
+        row.appendChild(numBadge);
+
+        // MAL thumbnail
+        if (season.malImageUrl) {
+            var thumb = document.createElement('img');
+            thumb.className = 'ms-mal-thumb';
+            thumb.src = season.malImageUrl;
+            thumb.alt = '';
+            row.appendChild(thumb);
+        }
+
+        // MAL info
+        var malInfo = document.createElement('div');
+        malInfo.className = 'ms-mal-info';
+
+        if (season.blocked) {
+            malInfo.innerHTML = '<span class="ms-badge-blocked">BLOCKED</span>';
+        } else if (season.malId) {
+            var titleEl = document.createElement('div');
+            titleEl.className = 'ms-mal-title';
+            titleEl.textContent = season.malTitle || ('MAL ID ' + season.malId);
+            malInfo.appendChild(titleEl);
+
+            var idEl = document.createElement('div');
+            idEl.className = 'ms-mal-id';
+            var srcLabel = season.malIdSource === 'pinned' ? 'PINNED' :
+                           season.malIdSource === 'provider' ? 'Provider ID' :
+                           season.malIdSource === 'cache' ? 'Cache' : '';
+            idEl.textContent = 'ID: ' + season.malId + (srcLabel ? ' · ' + srcLabel : '');
+            malInfo.appendChild(idEl);
+
+            if (season.pinned) {
+                var pinnedBadge = document.createElement('span');
+                pinnedBadge.className = 'ms-badge-pinned';
+                pinnedBadge.textContent = 'PINNED';
+                malInfo.appendChild(pinnedBadge);
+            }
+        } else {
+            var noMatchBadge = document.createElement('span');
+            noMatchBadge.className = 'ms-badge-unmatched';
+            noMatchBadge.textContent = '⚠ No Match';
+            noMatchBadge.title = season.isSpecial
+                ? 'Specials are not auto-synced. Use Edit → Pin to assign a MAL ID manually.'
+                : 'Could not resolve a MAL ID. Use Edit to search and pin one manually.';
+            malInfo.appendChild(noMatchBadge);
+        }
+
+        // Episode range pills — show inline in the season row
+        if (season.episodeRanges && season.episodeRanges.length > 0) {
+            var pillsDiv = document.createElement('div');
+            pillsDiv.className = 'ms-range-pills';
+            var maxPills = 4;
+            season.episodeRanges.slice(0, maxPills).forEach(function (r) {
+                var pill = document.createElement('span');
+                pill.className = 'ms-range-pill';
+                var to = r.episodeTo === 0 ? '∞' : r.episodeTo;
+                pill.textContent = 'Ep ' + r.episodeFrom + '–' + to;
+                pill.title = r.malTitle || ('MAL ' + r.malId);
+                pillsDiv.appendChild(pill);
+            });
+            if (season.episodeRanges.length > maxPills) {
+                var morePill = document.createElement('span');
+                morePill.className = 'ms-range-pill';
+                morePill.style.opacity = '.5';
+                morePill.textContent = '+' + (season.episodeRanges.length - maxPills) + ' more';
+                pillsDiv.appendChild(morePill);
+            }
+            malInfo.appendChild(pillsDiv);
+        }
+
+        row.appendChild(malInfo);
+
+        // Reset cache button — only shown when source is 'cache'
+        if (season.malIdSource === 'cache') {
+            var resetBtn = document.createElement('button');
+            resetBtn.type = 'button';
+            resetBtn.className = 'ms-btn ms-btn-sm';
+            resetBtn.textContent = '↺';
+            resetBtn.title = 'Remove cached MAL ID — will be re-resolved on next sync';
+            resetBtn.style.cssText = 'flex-shrink:0;opacity:.55;min-width:0;padding:.3em .5em';
+            resetBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                resetSeasonCache(series.jellyfinSeriesName, season.seasonNumber, resetBtn);
+            });
+            row.appendChild(resetBtn);
+        }
+
+        // Edit button
+        var editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'ms-btn ms-btn-sm';
+        editBtn.textContent = 'Edit';
+        editBtn.style.flexShrink = '0';
+        editBtn.addEventListener('click', function () {
+            openModal(series, season);
+        });
+        row.appendChild(editBtn);
+
+        // Quick tooltip on season row — shows immediately, then enriches with lazy MAL fetch
+        if (season.malTitle && !season.blocked) {
+            row.title = '';
+            row.addEventListener('mouseenter', function (e) {
+                var baseData = {
+                    title: season.malTitle,
+                    malId: season.malId,
+                    imageUrl: season.malImageUrl || null,
+                    source: season.malIdSource,
+                    pinned: season.pinned,
+                    episodeRanges: (season.episodeRanges && season.episodeRanges.length) ? season.episodeRanges : null,
+                };
+                // Show basic info immediately
+                showTip(baseData, e);
+
+                if (!season.malId) return;
+                var cacheKey = String(season.malId);
+                var enrich = function (details) {
+                    var merged = Object.assign({}, details, {
+                        source: baseData.source,
+                        pinned: baseData.pinned,
+                        episodeRanges: baseData.episodeRanges,
+                    });
+                    var tip = getTip();
+                    if (tip && tip.style.display !== 'none') showTip(merged, null);
+                };
+                if (_tipCache[cacheKey]) {
+                    enrich(_tipCache[cacheKey]);
+                } else {
+                    uJfGet('/MalSync/mal/anime/' + encodeURIComponent(cacheKey))
+                        .then(function (d) { if (d) { _tipCache[cacheKey] = d; enrich(d); } })
+                        .catch(function () {});
+                }
+            });
+            row.addEventListener('mousemove', moveTip);
+            row.addEventListener('mouseleave', hideTip);
+        }
+
+        return row;
+    }
+
+    function renderImportBlocks() {
+        // Reload user config to get current import blocks
+        uJfGet('/MalSync/user/config').then(function (cfg) {
+            var blocks = cfg.importBlocks || [];
+            var listDiv = q('u-blockList');
+            var emptyEl = q('u-blockEmpty');
+            listDiv.innerHTML = '';
+
+            if (!blocks.length) {
+                emptyEl.classList.remove('ms-hidden');
+                return;
+            }
+            emptyEl.classList.add('ms-hidden');
+
+            blocks.forEach(function (b) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:.6em;padding:.45em .7em;' +
+                    'border-radius:4px;background:rgba(255,255,255,.02);margin-bottom:.35em;' +
+                    'border:1px solid rgba(255,255,255,.06)';
+
+                var info = document.createElement('div');
+                info.style.flex = '1';
+                info.innerHTML = '<div style="font-size:.88em;font-weight:600">' + escHtml(b.malTitle || b.malId) + '</div>' +
+                    '<div style="font-size:.72em;opacity:.4">MAL ID ' + escHtml(b.malId) + '</div>';
+                row.appendChild(info);
+
+                var del = document.createElement('button');
+                del.type = 'button';
+                del.className = 'ms-btn ms-btn-sm ms-btn-danger';
+                del.textContent = 'Remove';
+                del.addEventListener('click', function () {
+                    removeImportBlock(b.malId);
+                });
+                row.appendChild(del);
+                listDiv.appendChild(row);
+            });
+        }).catch(function () {});
+    }
+
+    async function doBlockSearch(append) {
+        var query = q('u-blockSearchInput').value.trim();
+        if (!query) return;
+        var offset = append ? (_blockSearchOffset + 12) : 0;
+        _blockSearchOffset = offset;
+
+        var resultsDiv = q('u-blockSearchResults');
+        var spinner = q('u-blockSearchSpinner');
+        if (!append) {
+            resultsDiv.innerHTML = '';
+            resultsDiv.style.display = 'block';
+        } else {
+            var lm = resultsDiv.querySelector('.ms-load-more-wrap');
+            if (lm) lm.remove();
+        }
+        spinner.classList.add('active');
+        q('u-blockSearchBtn').disabled = true;
+
+        try {
+            var data = await uJfGet('/MalSync/mal/search?q=' + encodeURIComponent(query) + '&offset=' + offset);
+            var results = data.results || [];
+
+            if (!results.length && !append) {
+                resultsDiv.innerHTML = '<div style="padding:.5em;opacity:.4;font-size:.85em">No results found.</div>';
+                return;
+            }
+
+            results.forEach(function (r) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:.65em;padding:.45em .6em;' +
+                    'border-radius:4px;margin-bottom:.3em;background:rgba(255,255,255,.03);' +
+                    'border:1px solid rgba(255,255,255,.06)';
+                if (r.imageUrl) {
+                    var img = document.createElement('img');
+                    img.style.cssText = 'width:28px;height:40px;object-fit:cover;border-radius:2px;flex-shrink:0';
+                    img.src = r.imageUrl;
+                    img.alt = '';
+                    row.appendChild(img);
+                }
+                var info = document.createElement('div');
+                info.style.flex = '1';
+                info.innerHTML = '<div style="font-size:.88em;font-weight:600">' + escHtml(r.englishTitle || r.title) + '</div>' +
+                    '<div style="font-size:.72em;opacity:.4">ID: ' + escHtml(r.malId) + (r.numEpisodes ? ' · ' + r.numEpisodes + ' ep' : '') + '</div>';
+                row.appendChild(info);
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ms-btn ms-btn-sm ms-btn-danger';
+                btn.textContent = '⊘ Block';
+                btn.style.flexShrink = '0';
+                btn.addEventListener('click', function () { addImportBlock(r.malId, r.englishTitle || r.title); });
+                row.appendChild(btn);
+                row.addEventListener('mouseenter', function (e) { showTip(r, e); });
+                row.addEventListener('mousemove', moveTip);
+                row.addEventListener('mouseleave', hideTip);
+                resultsDiv.appendChild(row);
+            });
+
+            if (results.length >= 12) {
+                var wrap = document.createElement('div');
+                wrap.className = 'ms-load-more-wrap';
+                wrap.style.cssText = 'text-align:center;padding:.5em 0 .2em';
+                var loadBtn = document.createElement('button');
+                loadBtn.type = 'button';
+                loadBtn.className = 'ms-btn ms-btn-sm';
+                loadBtn.textContent = 'Load More';
+                loadBtn.addEventListener('click', function () { doBlockSearch(true); });
+                wrap.appendChild(loadBtn);
+                resultsDiv.appendChild(wrap);
+            }
+        } catch (e) {
+            if (!append)
+                resultsDiv.innerHTML = '<div style="padding:.5em;color:#ff6b6b;font-size:.85em">Search failed.</div>';
+        } finally {
+            spinner.classList.remove('active');
+            q('u-blockSearchBtn').disabled = false;
+        }
+    }
+
+    async function addImportBlock(malId, malTitle) {
+        if (!confirm('Block "' + malTitle + '" (ID: ' + malId + ') from import?')) return;
+        try {
+            await uJfPost('/MalSync/import/block', { malId: malId, malTitle: malTitle });
+            q('u-blockSearchResults').style.display = 'none';
+            q('u-blockSearchInput').value = '';
+            renderImportBlocks();
+        } catch (e) {
+            alert('Error: ' + (e.message || 'Could not add block'));
+        }
+    }
+
+    async function removeImportBlock(malId) {
+        try {
+            await uJfPost('/MalSync/import/block', { malId: malId, remove: true });
+            renderImportBlocks();
+        } catch (e) {
+            alert('Failed to remove block: ' + (e.message || 'Unknown error'));
+        }
+    }
+
+    async function clearAllRanges() {
+        if (!confirm('Remove ALL episode range mappings for your account?\n\nThis cleans up any incorrectly auto-detected ranges.\nRanges you configured manually in the Manage tab will also be removed.')) return;
+        try {
+            var result = await uJfPost('/MalSync/series/ranges/clear-all', {});
+            alert(result.message || 'All ranges cleared.');
+            loadSeriesList();
+        } catch (e) {
+            alert('Failed: ' + (e.message || 'Unknown error'));
+        }
+    }
+
+    async function clearCache() {
+        if (!confirm('Clear the MAL-ID cache for your account?\n\nThe next sync/import will re-resolve all series.')) return;
+        try {
+            await uJfPost('/MalSync/cache/clear', {});
+            alert('Cache cleared. Refresh the series list to see updated state.');
+            loadSeriesList();
+        } catch (e) {
+            alert('Failed to clear cache: ' + (e.message || 'Unknown error'));
+        }
+    }
+
+    // ── Modal ─────────────────────────────────────────────────────────────
+    function openModal(series, season) {
+        _modal.seriesId = series.jellyfinSeriesId;
+        _modal.seriesName = series.jellyfinSeriesName;
+        _modal.seasonNum = season.seasonNumber;
+        _modal.selectedMalId = null;
+        _modal.selectedMalTitle = null;
+        _modal.selectedMalImage = null;
+        _modal.isBlocked = season.blocked || false;
+
+        // Reset UI
+        q('u-modalTitle').textContent = 'Assign MAL ID';
+        q('u-modalSubtitle').textContent = series.jellyfinSeriesName + ' — Season ' + season.seasonNumber;
+        q('u-modalSearchInput').value = series.jellyfinSeriesName;
+        q('u-modalSearchResults').innerHTML = '';
+        q('u-modalPinBtn').disabled = true;
+        _modal.searchOffset = 0;
+        q('u-modalStatus').textContent = '';
+
+        // Update current assignment display
+        var titleEl = q('u-modalCurrentTitle');
+        var idEl = q('u-modalCurrentId');
+        var currentWrap = q('u-modalCurrent');
+        var currentImg = q('u-modalCurrentImg');
+        var currentPlaceholder = q('u-modalCurrentImgPlaceholder');
+
+        function setCurrentImage(url) {
+            if (url) {
+                currentImg.src = url;
+                currentImg.style.display = '';
+                if (currentPlaceholder) currentPlaceholder.style.display = 'none';
+            } else {
+                currentImg.src = '';
+                currentImg.style.display = 'none';
+                if (currentPlaceholder) currentPlaceholder.style.display = '';
+            }
+        }
+
+        if (season.blocked) {
+            titleEl.textContent = 'BLOCKED';
+            idEl.textContent = 'This season is excluded from sync';
+            currentWrap.style.borderColor = 'rgba(220,53,69,.4)';
+            setCurrentImage(null);
+        } else if (season.malId) {
+            titleEl.textContent = season.malTitle || ('MAL ID ' + season.malId);
+            idEl.textContent = 'ID: ' + season.malId + (season.pinned ? ' · pinned' : ' · ' + (season.malIdSource || ''));
+            currentWrap.style.borderColor = '';
+            setCurrentImage(season.malImageUrl || null);
+        } else {
+            titleEl.textContent = 'Not assigned';
+            idEl.textContent = 'No MAL ID resolved for this season';
+            currentWrap.style.borderColor = '';
+            setCurrentImage(null);
+        }
+
+        // Show/hide block/unblock buttons
+        if (season.blocked) {
+            q('u-modalBlockBtn').classList.add('ms-hidden');
+            q('u-modalUnblockBtn').classList.remove('ms-hidden');
+        } else {
+            q('u-modalBlockBtn').classList.remove('ms-hidden');
+            q('u-modalUnblockBtn').classList.add('ms-hidden');
+        }
+
+        // Show/hide clear button (only if there's an override)
+        q('u-modalClearBtn').style.display = (season.pinned || season.blocked) ? '' : 'none';
+
+        // Load existing ranges
+        _modal.ranges = (season.episodeRanges || []).map(function (r) { return Object.assign({}, r); });
+        renderRangesList();
+        // Collapse ranges section when opening
+        q('u-rangesBody').style.display = 'none';
+        q('u-rangesToggle').textContent = '▶ Expand' + (_modal.ranges.length ? ' (' + _modal.ranges.length + ' ranges)' : '');
+
+        q('u-malModal').classList.add('active');
+        q('u-modalSearchInput').focus();
+
+        // Lazy-fetch image if we have a malId but no cached image URL
+        if (season.malId && !season.malImageUrl) {
+            uJfGet('/MalSync/mal/anime/' + season.malId).then(function (details) {
+                if (!details || !details.imageUrl) return;
+                if (!q('u-malModal').classList.contains('active')) return;
+                var img = q('u-modalCurrentImg');
+                var ph = q('u-modalCurrentImgPlaceholder');
+                img.src = details.imageUrl;
+                img.style.display = '';
+                if (ph) ph.style.display = 'none';
+            }).catch(function () {});
+        }
+    }
+
+    function closeModal() {
+        q('u-malModal').classList.remove('active');
+        _modal.selectedMalId = null;
+        hideTip();
+    }
+
+    function _buildResultCard(r, resultsDiv, onSelect) {
+        var card = document.createElement('div');
+        card.className = 'ms-result-card';
+        card.dataset.malId = r.malId;
+        card.dataset.malTitle = r.title;
+        card.dataset.malImage = r.imageUrl || '';
+
+        var imgEl = document.createElement('img');
+        imgEl.className = 'ms-result-img';
+        imgEl.src = r.imageUrl || '';
+        imgEl.alt = '';
+        imgEl.onerror = function () { this.style.background = 'rgba(255,255,255,.06)'; this.src = ''; };
+        card.appendChild(imgEl);
+
+        var body = document.createElement('div');
+        body.className = 'ms-result-body';
+        var titleEl = document.createElement('div');
+        titleEl.className = 'ms-result-title';
+        titleEl.textContent = r.englishTitle || r.title;
+        body.appendChild(titleEl);
+        var meta = document.createElement('div');
+        meta.className = 'ms-result-meta';
+        var typeLabel = r.mediaType === 'tv' ? 'TV' : r.mediaType === 'movie' ? 'Movie' : (r.mediaType || '');
+        meta.textContent = 'ID: ' + r.malId + (typeLabel ? ' · ' + typeLabel : '') +
+            (r.numEpisodes ? ' · ' + r.numEpisodes + ' ep' : '');
+        body.appendChild(meta);
+        card.appendChild(body);
+
+        card.addEventListener('click', function () {
+            resultsDiv.querySelectorAll('.ms-result-card').forEach(function (c) { c.classList.remove('selected'); });
+            card.classList.add('selected');
+            if (onSelect) onSelect(r, card);
+        });
+        card.addEventListener('mouseenter', function (e) { showTip(r, e); });
+        card.addEventListener('mousemove', moveTip);
+        card.addEventListener('mouseleave', hideTip);
+        return card;
+    }
+
+    function _appendLoadMoreBtn(resultsDiv, onLoadMore) {
+        var wrap = document.createElement('div');
+        wrap.className = 'ms-load-more-wrap';
+        wrap.style.cssText = 'grid-column:1/-1;text-align:center;padding:.65em 0 .2em';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ms-btn ms-btn-sm';
+        btn.textContent = 'Load More';
+        btn.addEventListener('click', onLoadMore);
+        wrap.appendChild(btn);
+        resultsDiv.appendChild(wrap);
+    }
+
+    async function doModalSearch(append) {
+        var query = q('u-modalSearchInput').value.trim();
+        if (!query) return;
+
+        var offset = append ? (_modal.searchOffset + 12) : 0;
+        _modal.searchOffset = offset;
+
+        var resultsDiv = q('u-modalSearchResults');
+        var spinner = q('u-modalSearchSpinner');
+        if (!append) {
+            resultsDiv.innerHTML = '';
+            q('u-modalPinBtn').disabled = true;
+        } else {
+            var existing = resultsDiv.querySelector('.ms-load-more-wrap');
+            if (existing) existing.remove();
+        }
+        spinner.classList.add('active');
+        q('u-modalSearchBtn').disabled = true;
+
+        try {
+            var data = await uJfGet('/MalSync/mal/search?q=' + encodeURIComponent(query) + '&offset=' + offset);
+            var results = data.results || [];
+
+            if (!results.length && !append) {
+                resultsDiv.innerHTML = '<div style="padding:.8em;opacity:.4;font-size:.85em">No results found.</div>';
+                return;
+            }
+
+            results.forEach(function (r) {
+                resultsDiv.appendChild(_buildResultCard(r, resultsDiv, function (r, card) {
+                    _modal.selectedMalId = card.dataset.malId;
+                    _modal.selectedMalTitle = card.dataset.malTitle;
+                    _modal.selectedMalImage = card.dataset.malImage;
+                    q('u-modalPinBtn').disabled = false;
+                }));
+            });
+
+            if (results.length >= 12)
+                _appendLoadMoreBtn(resultsDiv, function () { doModalSearch(true); });
+        } catch (e) {
+            if (!append)
+                resultsDiv.innerHTML = '<div style="padding:.8em;color:#ff6b6b;font-size:.85em">Search failed: ' +
+                    escHtml(e.message || 'Unknown error') + '</div>';
+        } finally {
+            spinner.classList.remove('active');
+            q('u-modalSearchBtn').disabled = false;
+        }
+    }
+
+    async function pinSelected() {
+        if (!_modal.selectedMalId) return;
+        var status = q('u-modalStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/series/override', {
+                jellyfinSeriesId: _modal.seriesId,
+                jellyfinSeriesName: _modal.seriesName,
+                seasonNumber: _modal.seasonNum,
+                pinnedMalId: _modal.selectedMalId,
+                pinnedMalTitle: _modal.selectedMalTitle,
+                pinnedMalImageUrl: _modal.selectedMalImage || null,
+                blocked: false,
+            });
+            status.textContent = '✔ Pinned';
+            status.style.color = '#74c69d';
+            setTimeout(closeModal, 900);
+            loadSeriesList();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    async function blockSeason() {
+        if (!confirm('Block this season from sync? It will be skipped in all future syncs.')) return;
+        var status = q('u-modalStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/series/override', {
+                jellyfinSeriesId: _modal.seriesId,
+                jellyfinSeriesName: _modal.seriesName,
+                seasonNumber: _modal.seasonNum,
+                blocked: true,
+            });
+            status.textContent = '✔ Blocked';
+            status.style.color = '#ff8096';
+            setTimeout(closeModal, 800);
+            loadSeriesList();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    async function unblockSeason() {
+        var status = q('u-modalStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/series/override', {
+                jellyfinSeriesId: _modal.seriesId,
+                jellyfinSeriesName: _modal.seriesName,
+                seasonNumber: _modal.seasonNum,
+                remove: true,
+            });
+            status.textContent = '✔ Unblocked';
+            status.style.color = '#74c69d';
+            setTimeout(closeModal, 800);
+            loadSeriesList();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    async function clearOverride() {
+        if (!confirm('Remove the manual override for this season?')) return;
+        var status = q('u-modalStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/series/override', {
+                jellyfinSeriesId: _modal.seriesId,
+                seasonNumber: _modal.seasonNum,
+                remove: true,
+            });
+            status.textContent = '✔ Override cleared';
+            status.style.color = '#74c69d';
+            setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 2500);
+            // Update modal display in-place (keep it open)
+            q('u-modalCurrentTitle').textContent = 'Will re-resolve on next sync';
+            q('u-modalCurrentId').textContent = 'Override removed';
+            q('u-modalCurrentImg').style.display = 'none';
+            var ph = q('u-modalCurrentImgPlaceholder');
+            if (ph) ph.style.display = '';
+            q('u-modalCurrent').style.borderColor = '';
+            q('u-modalClearBtn').style.display = 'none';
+            q('u-modalBlockBtn').classList.remove('ms-hidden');
+            q('u-modalUnblockBtn').classList.add('ms-hidden');
+            loadSeriesList();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    async function blockImport() {
+        // Block either the selected search result or the currently assigned MAL ID
+        var targetId = _modal.selectedMalId;
+        var targetTitle = _modal.selectedMalTitle;
+
+        if (!targetId) {
+            // Fall back to current assignment shown in modal
+            var currentIdEl = q('u-modalCurrentId');
+            var match = (currentIdEl.textContent || '').match(/ID:\s*(\d+)/);
+            if (match) {
+                targetId = match[1];
+                targetTitle = q('u-modalCurrentTitle').textContent;
+            }
+        }
+
+        if (!targetId || targetId === 'undefined') {
+            alert('No MAL ID to block. Please search and select an entry first.');
+            return;
+        }
+
+        if (!confirm('Block MAL ID ' + targetId + ' (' + (targetTitle || '') + ') from Jellyseerr import?\n\nThis will skip it during all future import runs.')) return;
+
+        var status = q('u-modalStatus');
+        status.textContent = 'Saving…';
+        try {
+            await uJfPost('/MalSync/import/block', {
+                malId: targetId,
+                malTitle: targetTitle || '',
+            });
+            status.textContent = '✔ Import blocked';
+            status.style.color = '#ff8096';
+            setTimeout(function () { status.textContent = ''; status.style.color = ''; }, 2000);
+            renderImportBlocks();
+        } catch (e) {
+            status.textContent = '✖ ' + (e.message || 'Error');
+            status.style.color = '#e76f51';
+        }
+    }
+
+    // Load series list when Manage tab is activated
+    var _manageLoaded = false;
+    document.querySelectorAll('.ms-tab').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            if (btn.dataset.tab === 'u-tab-manage' && !_manageLoaded) {
+                _manageLoaded = true;
+                loadSeriesList();
+            }
+        });
+    });
 
     return { init: init };
 }());
@@ -997,5 +3311,9 @@ window.MalSyncUserPage = {
 </script>
 
 </div><!-- /MalSyncUserPage -->
+
+<!-- Global hover tooltip -->
+<div id="ms-hover-tooltip"></div>
+
 </body>
 </html>

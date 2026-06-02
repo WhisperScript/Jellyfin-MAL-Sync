@@ -7,7 +7,20 @@
 <body>
 <div id="MalSyncConfigPage" data-role="page" class="page libraryPage">
 <style>
-        .ms-page { max-width: 780px; }
+        .ms-page { width: 100%; box-sizing: border-box; }
+
+        :has(> #MalSyncConfigPage) { max-width: none !important; width: 100% !important; }
+
+        .ms-cfg-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.4em;
+            align-items: start;
+        }
+        @media (min-width: 600px) {
+            .ms-cfg-grid { grid-template-columns: 3fr 2fr; }
+            .ms-cfg-grid > .ms-card { margin-bottom: 0; }
+        }
 
         .ms-card {
             background: var(--card-background, rgba(255,255,255,.04));
@@ -134,6 +147,14 @@
         .ms-log .log-warn { color: #ffd166; }
         .ms-log .log-err  { color: #ff6b6b; }
         .ms-log .log-dbg  { color: rgba(160,180,200,.38); font-size: .9em; }
+
+        .ms-log-placeholder {
+            color: rgba(255,255,255,.2);
+            font-size: .82em;
+            text-align: center;
+            padding: .85em;
+            font-style: italic;
+        }
 
         .ms-log-line {
             display: grid;
@@ -366,6 +387,7 @@
             </div>
         </div>
 
+        <div class="ms-cfg-grid">
         <div class="ms-card">
             <p id="cfgImportProfilesTitle" class="ms-card-title">My Import Profiles</p>
 
@@ -450,17 +472,19 @@
 
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
                 <button id="btnImport"    type="button" class="ms-btn ms-btn-primary">▶ Import Now</button>
-                <button id="btnImportDry" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <button id="btnImportDry" type="button" class="ms-btn">⚡ Dry Run</button>
                 <span id="importSpinner" class="ms-spinner"></span>
             </div>
 
-            <div id="importLog" class="ms-log ms-hidden"></div>
+            <div id="importLog" class="ms-log"><div class="ms-log-placeholder">No output — start an Import</div></div>
         </div>
 
+        </div><!-- /ms-cfg-grid -->
     </div><!-- /cfg-tab-import -->
 
     <!-- ════════════════════════════════════ TAB: SYNC ════════════════════ -->
     <div id="cfg-tab-sync" class="ms-tab-panel">
+    <div class="ms-cfg-grid">
 
         <!-- Global Settings -->
         <div class="ms-card">
@@ -538,13 +562,14 @@
 
             <div style="display:flex;align-items:center;gap:.6em;flex-wrap:wrap">
                 <button id="btnSync"   type="button" class="ms-btn ms-btn-primary">▶ Sync Now</button>
-                <button id="btnDryRun" type="button" class="ms-btn">⚡ Dry Run (Preview)</button>
+                <button id="btnDryRun" type="button" class="ms-btn">⚡ Dry Run</button>
                 <span id="syncSpinner" class="ms-spinner"></span>
             </div>
 
-            <div id="syncLog" class="ms-log ms-hidden"></div>
+            <div id="syncLog" class="ms-log"><div class="ms-log-placeholder">No output — start a Sync</div></div>
         </div>
 
+    </div><!-- /ms-cfg-grid -->
     </div><!-- /cfg-tab-sync -->
 
 </div><!-- /content-primary -->
@@ -588,6 +613,9 @@ window.MalSync = (function () {
     function q(id) { return document.getElementById(id); }
 
     function logLine(container, text) {
+        var ph = container.querySelector('.ms-log-placeholder');
+        if (ph) ph.remove();
+
         const t = text ?? '';
         const info = classifyLogLine(t);
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -611,7 +639,7 @@ window.MalSync = (function () {
         row.appendChild(bEl);
         row.appendChild(msg);
         container.appendChild(row);
-        container.scrollTop = container.scrollHeight;
+        if (!container._userScrolled) container.scrollTop = container.scrollHeight;
     }
 
     function classifyLogLine(t) {
@@ -646,6 +674,20 @@ window.MalSync = (function () {
     async function init(view) {
         if (_initialized) return;
         _initialized = true;
+
+        // Expand Jellyfin's page wrapper to use available width
+        (function () {
+            var el = document.getElementById('MalSyncConfigPage');
+            if (!el) return;
+            var p = el.parentElement;
+            while (p && p !== document.body) {
+                p.style.setProperty('max-width', 'none', 'important');
+                p.style.setProperty('width', '100%', 'important');
+                var tag = p.tagName.toLowerCase();
+                if (tag === 'main' || p.classList.contains('scrollY') || p.classList.contains('skinBody')) break;
+                p = p.parentElement;
+            }
+        }());
 
         initTabs();
 
@@ -1003,8 +1045,14 @@ window.MalSync = (function () {
 
     // ── SSE stream helper ─────────────────────────────────────────────────
     async function streamSse(url, logDiv, spinner, btns) {
-        logDiv.innerHTML = '';
-        logDiv.classList.remove('ms-hidden');
+        logDiv.innerHTML = '<div class="ms-log-placeholder">Connecting…</div>';
+        logDiv._userScrolled = false;
+        if (!logDiv._scrollListenerAdded) {
+            logDiv._scrollListenerAdded = true;
+            logDiv.addEventListener('scroll', function () {
+                logDiv._userScrolled = (logDiv.scrollHeight - logDiv.scrollTop - logDiv.clientHeight) > 5;
+            }, { passive: true });
+        }
         spinner.classList.add('active');
         btns.forEach(function (b) { b.disabled = true; });
 
@@ -1039,7 +1087,6 @@ window.MalSync = (function () {
         } finally {
             spinner.classList.remove('active');
             btns.forEach(function (b) { b.disabled = false; });
-            logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
