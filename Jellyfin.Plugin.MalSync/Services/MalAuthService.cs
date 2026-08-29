@@ -129,6 +129,39 @@ public sealed class MalAuthService
 
     // ── Public helpers ────────────────────────────────────────────────────
 
+    // ── Client-ID validation (admin diagnostics) ──────────────────────────
+
+    /// <summary>
+    /// Verifies that a MAL client-id is accepted by the MAL API by issuing a
+    /// minimal anonymous search request. Used by the admin diagnostics panel.
+    /// </summary>
+    public async Task<(bool Ok, string Message)> ProbeClientIdAsync(string clientId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(clientId))
+            return (false, "No client-ID configured.");
+
+        try
+        {
+            var http = _httpFactory.CreateClient("MalSync");
+            using var req = new HttpRequestMessage(
+                HttpMethod.Get, "https://api.myanimelist.net/v2/anime?q=cowboy&limit=1");
+            req.Headers.TryAddWithoutValidation("X-MAL-CLIENT-ID", clientId.Trim());
+
+            using var resp = await http.SendAsync(req, ct).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+                return (true, "Client-ID accepted by MyAnimeList.");
+            if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized
+             || resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                return (false, "MyAnimeList rejected this client-ID.");
+            return (false, $"MyAnimeList returned HTTP {(int)resp.StatusCode}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "MAL client-id probe failed.");
+            return (false, "Could not reach MyAnimeList: " + ex.Message);
+        }
+    }
+
     public bool HasValidToken(string userId)
     {
         var uc = GetOrCreateUserConfig(userId);

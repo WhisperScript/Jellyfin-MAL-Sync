@@ -20,6 +20,9 @@ public sealed class JellyseerrImportService
     private readonly ILogger<JellyseerrImportService> _logger;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _importGates = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DateTime> _recentSubmitted = new(StringComparer.OrdinalIgnoreCase);
+
+    // Last import summary sent per user, so an unchanged one is not sent twice.
+    private static readonly ConcurrentDictionary<string, string> _lastImportSummary = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan _recentSubmittedTtl = TimeSpan.FromMinutes(30);
 
     public JellyseerrImportService(
@@ -430,6 +433,28 @@ public sealed class JellyseerrImportService
                 continue;
             }
 
+            // ── Nothing to fetch yet? ─────────────────────────────────────
+            // Announced-but-unaired seasons are the reason the same handful of titles
+            // used to be reported as requested after every run: Jellyseerr accepts the
+            // request, creates nothing, and the next run tries again. Skip them until
+            // they actually exist — the entry stays on the MAL list, so a later run
+            // picks it up on its own.
+            if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase)
+                && tvDetail.RawSeasons.Count > 0)
+            {
+                var wanted = requestAllSeasons
+                    ? tvDetail.RawSeasons
+                    : tvDetail.RawSeasons.Where(x => x.SeasonNumber == seasonNumber).ToList();
+
+                if (wanted.Count > 0 && wanted.All(x => !x.HasAired()))
+                {
+                    Log($"[SKIP] '{title}' → {(requestAllSeasons ? "no season" : $"season {seasonNumber}")} "
+                      + "has aired yet; it will be requested once episodes exist.");
+                    skipped++;
+                    continue;
+                }
+            }
+
             string seasonDesc = requestAllSeasons ? "all seasons" : $"S{seasonNumber}";
 
             Log($"[REQUEST] '{title}' (MAL {malId}) → TMDB {searchResult.Id} {seasonDesc} [{malStatus}] [{profile.Name}]");
@@ -439,7 +464,13 @@ public sealed class JellyseerrImportService
                 // For RequestAllSeasons, pass the season list from the already-cached tv detail lookup
                 List<int>? explicitSeasons = null;
                 if (requestAllSeasons && tvDetail.Seasons.Count > 0)
-                    explicitSeasons = tvDetail.Seasons;
+                {
+                    // Only the seasons that exist; an unaired one in the list makes
+                    // Jellyseerr discard the whole request.
+                    var aired = tvDetail.RawSeasons.Where(x => x.HasAired())
+                                                   .Select(x => x.SeasonNumber).ToList();
+                    explicitSeasons = aired.Count > 0 ? aired : tvDetail.Seasons;
+                }
 
                 // Explicit anime routing is only used as a FALLBACK when we could not resolve a
                 // Jellyseerr user ID (i.e. X-Api-User cannot be sent).
@@ -517,20 +548,28 @@ public sealed class JellyseerrImportService
                     .ToList();
                 if (errors.Count > 0)
                 {
-                    var desc = $"**{errors.Count} Fehler** beim Import erkannt:\n" +
+                    var desc = $"**{errors.Count} problem(s)** during the import:\n" +
                                string.Join("\n", errors.Take(5).Select(l => $"• `{l}`"));
-                    if (errors.Count > 5) desc += $"\n_{errors.Count - 5} weitere Fehler_";
-                    _ = SendWebhookAsync(userCfg.WebhookUrl, "❌ MAL→Jellyseerr Import: Fehler", desc);
+                    if (errors.Count > 5) desc += $"\n_and {errors.Count - 5} more_";
+                    _ = SendWebhookAsync(userCfg.WebhookUrl, "❌ MAL Sync: import problems", desc);
                 }
             }
 
             if (userCfg.WebhookOnImportSummary && !dryRun && submitted > 0)
             {
                 var requests = log.Where(l => l.StartsWith("[REQUEST]")).ToList();
-                var desc = $"**{submitted} Anfrage(n)** an Jellyseerr übermittelt:\n" +
+                var desc = $"**{submitted} request(s)** created in Jellyseerr:\n" +
                            string.Join("\n", requests.Take(10).Select(l => $"• {l.Replace("[REQUEST] ", "")}"));
-                if (requests.Count > 10) desc += $"\n_{requests.Count - 10} weitere_";
-                _ = SendWebhookAsync(userCfg.WebhookUrl, "✅ Import abgeschlossen", desc);
+                if (requests.Count > 10) desc += $"\n_and {requests.Count - 10} more_";
+
+                // A summary identical to the one just sent means the same titles were
+                // requested again, which is a loop rather than news. Say nothing.
+                if (IsNewSummary(jellyfinUserId, desc))
+                    _ = SendWebhookAsync(userCfg.WebhookUrl, "✅ MAL Sync: new requests", desc);
+                else
+                    _logger.LogInformation(
+                        "Import summary for user {UserId} is unchanged from the last run; not notifying again.",
+                        jellyfinUserId);
             }
         }
 
@@ -540,6 +579,18 @@ public sealed class JellyseerrImportService
         {
             gate.Release();
         }
+    }
+
+    /// <summary>
+    /// True when this summary differs from the one last sent to the user. Repeating an
+    /// identical list run after run is noise, and normally means the requests are not
+    /// sticking rather than that new ones were made.
+    /// </summary>
+    private static bool IsNewSummary(string userId, string summary)
+    {
+        var previous = _lastImportSummary.GetValueOrDefault(userId);
+        _lastImportSummary[userId] = summary;
+        return !string.Equals(previous, summary, StringComparison.Ordinal);
     }
 
     private async Task SendWebhookAsync(string webhookUrl, string title, string description)
@@ -878,6 +929,8 @@ public sealed class JellyseerrImportService
         string? firstError = null;
         foreach (var query in queries)
         {
+            for (var attempt = 1; attempt <= 2; attempt++)
+            {
             try
             {
                 using var http = CreateJellyseerrClient(baseUrl, apiKey);
@@ -889,7 +942,7 @@ public sealed class JellyseerrImportService
                     var errMsg = $"HTTP {(int)resp.StatusCode} from Jellyseerr search (query: '{query}')";
                     firstError ??= errMsg;
                     _logger.LogWarning("{Error}", errMsg);
-                    continue;
+                    break;   // try the next query spelling, not the same one again
                 }
 
                 var page = await resp.Content.ReadFromJsonAsync<JellyseerrSearchPage>(
@@ -903,12 +956,27 @@ public sealed class JellyseerrImportService
                     string.Equals(r.MediaType, "movie", StringComparison.OrdinalIgnoreCase));
 
                 if (match is not null) return (match, null);
+                break;   // answered, just nothing useful in it
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // A timeout, not a cancellation: worth one retry before moving on.
+                if (attempt == 1)
+                {
+                    _logger.LogDebug("Jellyseerr search for '{Query}' timed out, retrying once.", query);
+                    continue;
+                }
+                var timeoutMsg = $"Jellyseerr did not answer in time when searching for '{query}'";
+                firstError ??= timeoutMsg;
+                _logger.LogWarning("{Error}", timeoutMsg);
             }
             catch (Exception ex)
             {
                 var errMsg = $"Exception searching Jellyseerr for '{query}': {ex.Message}";
                 firstError ??= errMsg;
                 _logger.LogWarning(ex, "{Error}", errMsg);
+                break;
+            }
             }
         }
         return (null, firstError);
@@ -1032,9 +1100,23 @@ public sealed class JellyseerrImportService
 
             if (resp.IsSuccessStatusCode)
             {
+                // Jellyseerr answers 2xx even when it quietly creates nothing — most often
+                // for a season TMDB does not have yet. A created request always comes back
+                // with an id, so that is what decides, not the status code. Reporting a
+                // request that does not exist is why the same titles used to be
+                // "submitted" on every single run.
+                var createdId = TryReadRequestId(responseBody);
+                if (createdId is null)
+                {
+                    _logger.LogWarning(
+                        "Jellyseerr accepted the request for '{Title}' (TMDB {Id}) but created nothing — response: {Body}",
+                        title, tmdbId, responseBody);
+                    return false;
+                }
+
                 _logger.LogInformation(
-                    "Jellyseerr request created for '{Title}' (TMDB {Id}) — response: {Body}",
-                    title, tmdbId, responseBody);
+                    "Jellyseerr request {RequestId} created for '{Title}' (TMDB {Id}).",
+                    createdId, title, tmdbId);
                 return true;
             }
 
@@ -1056,6 +1138,28 @@ public sealed class JellyseerrImportService
         {
             _logger.LogError(ex, "Exception submitting Jellyseerr request for '{Title}'", title);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// The id of the request Jellyseerr says it created, or null when the response
+    /// carries no request — which is how a silently ignored submission looks.
+    /// </summary>
+    private static int? TryReadRequestId(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            if (!doc.RootElement.TryGetProperty("id", out var id)) return null;
+            return id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value) && value > 0
+                ? value
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -1200,11 +1304,94 @@ public sealed class JellyseerrImportService
         return http;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ADMIN DIAGNOSTICS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>Outcome of a Jellyseerr connectivity check shown in the admin diagnostics panel.</summary>
+    /// <param name="Ok">True when Jellyseerr answered and the API key was accepted.</param>
+    /// <param name="Message">Human-readable result, safe to show in the UI.</param>
+    /// <param name="Version">Jellyseerr version string, when reported.</param>
+    /// <param name="UserCount">Number of Jellyseerr accounts, when readable.</param>
+    /// <param name="MappedJellyfinUserIds">Jellyfin user IDs (dashless, lowercase) that map to a Jellyseerr account.</param>
+    public sealed record JellyseerrProbeResult(
+        bool Ok,
+        string Message,
+        string? Version,
+        int UserCount,
+        IReadOnlyCollection<string> MappedJellyfinUserIds);
+
+    /// <summary>
+    /// Checks whether the configured Jellyseerr instance is reachable, whether the API
+    /// key is accepted, and which Jellyfin accounts have a matching Jellyseerr user.
+    /// Never throws — connection problems are reported through the returned record.
+    /// </summary>
+    public async Task<JellyseerrProbeResult> ProbeAsync(CancellationToken ct = default)
+    {
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var empty = Array.Empty<string>();
+
+        if (string.IsNullOrWhiteSpace(cfg.JellyseerrUrl) || string.IsNullOrWhiteSpace(cfg.JellyseerrApiKey))
+            return new JellyseerrProbeResult(false, "Jellyseerr URL or API key is not configured.", null, 0, empty);
+
+        try
+        {
+            using var http = CreateJellyseerrClient(cfg.JellyseerrUrl, cfg.JellyseerrApiKey);
+
+            var statusResp = await http.GetAsync("/api/v1/status", ct).ConfigureAwait(false);
+            if (!statusResp.IsSuccessStatusCode)
+                return new JellyseerrProbeResult(
+                    false, $"Jellyseerr answered with HTTP {(int)statusResp.StatusCode}.", null, 0, empty);
+
+            string? version = null;
+            try
+            {
+                var status = await statusResp.Content
+                    .ReadFromJsonAsync<JellyseerrStatus>(cancellationToken: ct).ConfigureAwait(false);
+                version = status?.Version;
+            }
+            catch { /* version is cosmetic */ }
+
+            // The user list requires a valid API key, so it doubles as the auth check.
+            var userResp = await http.GetAsync("/api/v1/user?take=1000", ct).ConfigureAwait(false);
+            if (!userResp.IsSuccessStatusCode)
+                return new JellyseerrProbeResult(
+                    false,
+                    $"Reached Jellyseerr {version ?? string.Empty}, but the API key was rejected (HTTP {(int)userResp.StatusCode}).".Trim(),
+                    version, 0, empty);
+
+            var users = await userResp.Content
+                .ReadFromJsonAsync<JellyseerrUserList>(cancellationToken: ct).ConfigureAwait(false);
+            var results = users?.Results ?? new List<JellyseerrUser>();
+
+            var mapped = results
+                .Where(u => !string.IsNullOrEmpty(u.JellyfinUserId))
+                .Select(u => u.JellyfinUserId!.Replace("-", string.Empty, StringComparison.Ordinal).ToLowerInvariant())
+                .ToHashSet(StringComparer.Ordinal);
+
+            return new JellyseerrProbeResult(
+                true, "Connected.", version, results.Count, mapped);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Jellyseerr probe failed.");
+            return new JellyseerrProbeResult(false, "Could not reach Jellyseerr: " + ex.Message, null, 0, empty);
+        }
+    }
+
+    private sealed class JellyseerrStatus
+    {
+        [JsonPropertyName("version")] public string? Version { get; set; }
+    }
+
     private HttpClient CreateJellyseerrClient(string baseUrl, string apiKey)
     {
         var http = _httpFactory.CreateClient("MalSync");
         http.BaseAddress = new Uri(baseUrl.TrimEnd('/'));
         http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-Key", apiKey);
+        // Jellyseerr proxies TMDB for searches, so a cold lookup can take a while.
+        // The shared 30-second default was cutting real work short.
+        http.Timeout = TimeSpan.FromSeconds(60);
         return http;
     }
 
@@ -1404,6 +1591,22 @@ public sealed class JellyseerrImportService
     {
         [JsonPropertyName("seasonNumber")] public int     SeasonNumber { get; set; }
         [JsonPropertyName("name")]         public string? Name         { get; set; }
+        [JsonPropertyName("episodeCount")] public int     EpisodeCount { get; set; }
+        [JsonPropertyName("airDate")]      public string? AirDate      { get; set; }
+
+        /// <summary>
+        /// Whether anything of this season exists to fetch yet. An announced season has
+        /// no episodes, or a first air date still in the future; requesting it achieves
+        /// nothing and Jellyseerr tends to drop the request without saying so.
+        /// </summary>
+        public bool HasAired()
+        {
+            if (EpisodeCount <= 0) return false;
+            if (DateTime.TryParse(AirDate, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var aired))
+                return aired.Date <= DateTime.UtcNow.Date;
+            return true;
+        }
     }
 
     // ── Sonarr (fetched via Jellyseerr settings proxy) ─────────────────────

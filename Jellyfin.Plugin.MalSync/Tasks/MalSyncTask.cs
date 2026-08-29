@@ -59,6 +59,19 @@ public sealed class MalSyncTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var cfg = MalSyncPlugin.Instance!.Configuration;
+
+        // Drop settings belonging to Jellyfin accounts that no longer exist. They
+        // otherwise fail on every run and fill the log with a user ID that cannot be
+        // acted on, because there is nothing left to act on.
+        var removed = cfg.UserConfigs.RemoveAll(u =>
+            !Guid.TryParse(u.UserId, out var id) || _userManager.GetUserById(id) is null);
+        if (removed > 0)
+        {
+            _logger.LogInformation(
+                "MAL Sync: removed settings for {Count} deleted Jellyfin account(s).", removed);
+            MalSyncPlugin.Instance.SaveConfiguration();
+        }
+
         var users = cfg.UserConfigs.Select(u => u.UserId).ToList();
 
         if (users.Count == 0)

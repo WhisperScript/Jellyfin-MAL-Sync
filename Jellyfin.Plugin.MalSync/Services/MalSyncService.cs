@@ -223,12 +223,12 @@ public sealed class MalSyncService
                             // Send webhook notification if configured and enabled
                             if (!string.IsNullOrEmpty(userCfg.WebhookUrl) && userCfg.WebhookOnStaleRanges)
                             {
-                                var msg = $"**{notice.JellyfinSeriesName}** — Staffel {notice.SeasonNumber}\n" +
-                                          $"Mehr Folgen vorhanden als **{notice.MalTitle}** auf MAL hat.\n" +
-                                          $"Ein neuer Part könnte verfügbar sein.\n\n" +
-                                          $"*Manage → Edit → Auto-detect from MAL*";
+                                var msg = $"**{notice.JellyfinSeriesName}** — season {notice.SeasonNumber}\n" +
+                                          $"Jellyfin has more episodes than **{notice.MalTitle}** covers on MyAnimeList.\n" +
+                                          $"A new part has probably aired, so the split needs extending.\n\n" +
+                                          $"*Open MAL Sync → Library to review it.*";
                                 _ = SendWebhookAsync(userCfg.WebhookUrl,
-                                    "⚠️ MAL Sync: Ranges möglicherweise veraltet", msg);
+                                    "⚠️ MAL Sync: a season split looks out of date", msg);
                             }
                         },
                         cancellationToken).ConfigureAwait(false);
@@ -286,6 +286,22 @@ public sealed class MalSyncService
                     }
                 }
 
+                // Evidence beyond the title, used to separate candidates that score
+                // alike: how many episodes this season actually has and what year it
+                // is from. Computed lazily — it only matters on a cache miss.
+                MatchHints? hintsCache = null;
+                MatchHints Hints()
+                {
+                    if (hintsCache is null)
+                    {
+                        var epCount = GetEpisodes(Guid.Parse(seasonId), jfUser).Count;
+                        if (epCount == 0)
+                            epCount = GetEpisodesBySeriesAndSeason(Guid.Parse(seriesId), seasonNum, jfUser).Count;
+                        hintsCache = new MatchHints(epCount, season.ProductionYear ?? series.ProductionYear);
+                    }
+                    return hintsCache.Value;
+                }
+
                 // ── Resolve MAL ID ─────────────────────────────────────
                 string? malId2 = season.ProviderIds?.GetValueOrDefault("MyAnimeList");
                 if (malId2 is not null)
@@ -316,40 +332,45 @@ public sealed class MalSyncService
                     if (seasonNum == 1 || seasonNum == 0)
                     {
                         malId2 = series.ProviderIds?.GetValueOrDefault("MyAnimeList");
+                        MalMatch? match = null;
                         if (malId2 is null)
                         {
                             // Primary search: full series name
                             Dbg($"No MAL ID for '{seriesName}' S{seasonNum}, searching by title…");
-                            malId2 = await SearchMalIdAsync(seriesName, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                            match = await SearchMalMatchAsync(seriesName, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken, hints: Hints()).ConfigureAwait(false);
                         }
 
                         // Fallback 1: strip subtitle after ":"
-                        if (malId2 is null && seriesName.Contains(':'))
+                        if (malId2 is null && match is null && seriesName.Contains(':'))
                         {
                             var noSubtitle = seriesName[..seriesName.IndexOf(':')].Trim();
                             if (noSubtitle.Length >= 3)
                             {
                                 Dbg($"  Fallback search without subtitle: '{noSubtitle}'…");
-                                malId2 = await SearchMalIdAsync(noSubtitle, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                                match = await SearchMalMatchAsync(noSubtitle, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken, hints: Hints()).ConfigureAwait(false);
                             }
                         }
 
                         // Fallback 2: strip trailing season/part suffix
-                        if (malId2 is null)
+                        if (malId2 is null && match is null)
                         {
                             var stripped = StripSeasonSuffix(seriesName);
                             if (stripped.Length >= 3 && stripped != seriesName)
                             {
                                 Dbg($"  Fallback search stripped suffix: '{stripped}'…");
-                                malId2 = await SearchMalIdAsync(stripped, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                                match = await SearchMalMatchAsync(stripped, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken, hints: Hints()).ConfigureAwait(false);
                             }
                         }
+
+                        malId2 ??= match?.Id;
 
                         if (malId2 is not null)
                         {
                             if (seasonNum == 1) s1IdCache.TryAdd(seriesId, malId2);
                             SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId2,
-                                malUserList.TryGetValue(malId2, out var uEntry2) ? uEntry2.Title : null);
+                                malUserList.TryGetValue(malId2, out var uEntry2) ? uEntry2.Title : match?.Title,
+                                match?.ImageUrl,
+                                match?.Episodes ?? 0);
                         }
                     }
                     else
@@ -359,23 +380,28 @@ public sealed class MalSyncService
                         {
                             var baseTitle = StripSeasonSuffix(seriesName);
                             Dbg($"No S1 cache for '{seriesName}', searching S1 by title '{baseTitle}'…");
-                            s1Id = await SearchMalIdAsync(baseTitle, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                            s1Id = await SearchMalIdAsync(baseTitle, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken,
+                                hints: new MatchHints(0, series.ProductionYear)).ConfigureAwait(false);
                         }
                         if (s1Id is not null)
                         {
                             Dbg($"Traversing sequel chain for '{seriesName}' S{seasonNum} from S1 ID {s1Id}…");
                             malId2 = await GetMalSequelFromChainAsync(s1Id, seasonNum, seriesName, malHeaders, cancellationToken).ConfigureAwait(false);
                         }
+                        MalMatch? seqMatch = null;
                         if (malId2 is null)
                         {
                             var suffix = seasonNum switch { 2 => "2nd Season", 3 => "3rd Season", 4 => "4th Season", 5 => "5th Season", _ => $"{seasonNum}th Season" };
                             Dbg($"Sequel chain failed, direct search for '{seriesName} {suffix}'…");
-                            malId2 = await SearchMalIdAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken).ConfigureAwait(false);
+                            seqMatch = await SearchMalMatchAsync($"{seriesName} {suffix}", malHeaders, seasonNum, cfg.MalSearchMinSimilarity, cancellationToken, hints: Hints()).ConfigureAwait(false);
+                            malId2 = seqMatch?.Id;
                         }
                         if (malId2 is not null)
                         {
                             SetCachedMalId(cacheScope, normalizedSeriesName, seasonNum, malId2,
-                                malUserList.TryGetValue(malId2, out var uEntry3) ? uEntry3.Title : null);
+                                malUserList.TryGetValue(malId2, out var uEntry3) ? uEntry3.Title : seqMatch?.Title,
+                                seqMatch?.ImageUrl,
+                                seqMatch?.Episodes ?? 0);
                         }
                     }
                 }
@@ -396,7 +422,7 @@ public sealed class MalSyncService
                         if (remapped is null)
                         {
                             Dbg($"No usable MAL list match left for '{seriesName}' S1, searching title with exclusion…");
-                            remapped = await SearchMalIdAsync(seriesName, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken, excluded).ConfigureAwait(false);
+                            remapped = await SearchMalIdAsync(seriesName, malHeaders, 1, cfg.MalSearchMinSimilarity, cancellationToken, excluded, Hints()).ConfigureAwait(false);
                         }
 
                         if (remapped is not null)
@@ -419,6 +445,7 @@ public sealed class MalSyncService
 
                 if (malId2 is null)
                 {
+                    SetCachedNoMatch(cacheScope, normalizedSeriesName, seasonNum);
                     var unresolvedLabel = seasonNum == 0
                         ? $"{seriesName} [Specials]"
                         : $"{seriesName} S{seasonNum}";
@@ -430,7 +457,7 @@ public sealed class MalSyncService
                 // ── Hint: suggest range mapping when episodes don't match ──
                 // Auto-saving ranges during sync is intentionally NOT done — it produced
                 // false positives (e.g. Tomozaki S2, Ramparts of Ice with 1-ep MAL chain entries).
-                // Users should trigger auto-detect manually via Manage → Edit → Episode Ranges → 🔍 Auto-detect.
+                // The season is flagged instead; the Library tab offers the split there.
                 if (malUserList.TryGetValue(malId2, out var checkListEntry) && checkListEntry.Total > 0)
                 {
                     var jfEpCount = GetEpisodes(Guid.Parse(seasonId), jfUser).Count;
@@ -441,7 +468,7 @@ public sealed class MalSyncService
                     {
                         var label = seasonNum == 0 ? $"{seriesName} [Specials]" : $"{seriesName} S{seasonNum}";
                         Log($"[WARN] '{label}': Jellyfin has {jfEpCount} episodes but MAL entry only has {checkListEntry.Total}. " +
-                            "If multiple MAL parts share one Jellyfin season, use Manage → Edit → Episode Ranges → 🔍 Auto-detect.");
+                            "If one Jellyfin season covers several MAL entries, open MAL Sync \u2192 Library and split it.");
                     }
                 }
 
@@ -455,7 +482,7 @@ public sealed class MalSyncService
 
         if (unresolved.Count > 0)
         {
-            Log($"[WARN] {unresolved.Count} season(s) could not be matched to MAL — use the Manage tab to pin them manually:");
+            Log($"[WARN] {unresolved.Count} season(s) could not be matched to MAL — open MAL Sync \u2192 Library and press Fix to choose an entry:");
             foreach (var u in unresolved)
                 Log($"[WARN]  ⚠ {u}");
         }
@@ -472,10 +499,10 @@ public sealed class MalSyncService
                     .ToList();
                 if (errors.Count > 0)
                 {
-                    var desc = $"**{errors.Count} Fehler** beim Sync erkannt:\n" +
+                    var desc = $"**{errors.Count} problem(s)** during the sync:\n" +
                                string.Join("\n", errors.Take(5).Select(l => $"• `{l}`"));
-                    if (errors.Count > 5) desc += $"\n_{errors.Count - 5} weitere Fehler_";
-                    _ = SendWebhookAsync(userCfg.WebhookUrl, "❌ MAL Sync: Fehler aufgetreten", desc);
+                    if (errors.Count > 5) desc += $"\n_and {errors.Count - 5} more_";
+                    _ = SendWebhookAsync(userCfg.WebhookUrl, "❌ MAL Sync: sync problems", desc);
                 }
             }
 
@@ -484,10 +511,10 @@ public sealed class MalSyncService
                 var updates = log.Where(l => l.StartsWith("[MAL] ")).ToList();
                 if (updates.Count > 0)
                 {
-                    var desc = $"**{updates.Count} Einträge** aktualisiert:\n" +
+                    var desc = $"**{updates.Count} entries** updated on MyAnimeList:\n" +
                                string.Join("\n", updates.Take(10).Select(l => $"• {l.Replace("[MAL] ", "")}"));
-                    if (updates.Count > 10) desc += $"\n_{updates.Count - 10} weitere_";
-                    _ = SendWebhookAsync(userCfg.WebhookUrl, "✅ MAL Sync abgeschlossen", desc);
+                    if (updates.Count > 10) desc += $"\n_and {updates.Count - 10} more_";
+                    _ = SendWebhookAsync(userCfg.WebhookUrl, "✅ MAL Sync: progress sent", desc);
                 }
             }
         }
@@ -556,7 +583,7 @@ public sealed class MalSyncService
                 && airingStatus == "finished_airing")
             {
                 log($"[WARN] {label}: {rawWatchedInRange} episodes watched but MAL only has {malTotal}. " +
-                    $"A new sequel part may be available — re-run Auto-detect from MAL in the Manage tab to update ranges.");
+                    $"A new part has probably aired — open MAL Sync \u2192 Library to extend the split.");
                 onNotice?.Invoke(new Configuration.StaleRangeNotice
                 {
                     JellyfinSeriesId   = rangeMapping.JellyfinSeriesId,
@@ -609,12 +636,16 @@ public sealed class MalSyncService
         malUserList.TryGetValue(malId, out var malEntry);
         int malTotal = malEntry?.Total ?? 0;
         var airingStatus = malEntry?.AiringStatus ?? string.Empty;
+        string? malDisplayTitle = malEntry?.Title;
+        string? malImageUrl = null;
 
         if (malEntry is null)
         {
             var info = await GetMalAnimeInfoAsync(malId, malHeaders, cancellationToken).ConfigureAwait(false);
             malTotal = info.NumEpisodes;
             airingStatus = info.Status ?? string.Empty;
+            malDisplayTitle = info.AlternativeTitles?.En is { Length: > 0 } en ? en : info.Title;
+            malImageUrl = info.MainPicture?.Medium ?? info.MainPicture?.Large;
         }
         dbg($"'{seriesName}' S{seasonNum} → MAL ID {malId}, eps: {(malTotal > 0 ? malTotal : "?")}, airing: {airingStatus}");
 
@@ -630,6 +661,66 @@ public sealed class MalSyncService
                 return;
             }
             dbg($"  → '{seriesName}' S{seasonNum}: series-level fallback returned {episodes.Count} episode(s).");
+        }
+
+        // Remember what we learned about the MAL entry, so the library view can name it
+        // and flag a season that has outgrown it without asking MAL again.
+        UpdateCachedDetails(cacheScope, normalizedSeriesName, seasonNum, malTotal, malDisplayTitle, malImageUrl);
+
+        // ── One Jellyfin season, several MAL entries ───────────────────
+        // The classic shape for long-running shows: Jellyfin keeps everything under
+        // one season while MAL splits it into cours. Syncing that against a single
+        // entry silently caps progress, so surface it instead of failing quietly.
+        if (malTotal > 0 && episodes.Count >= 12 && episodes.Count > malTotal * 1.5)
+        {
+            var uc = _auth.GetOrCreateUserConfig(jellyfinUserId);
+            var hasRanges = uc.EpisodeRangeMappings.Any(m =>
+                m.JellyfinSeriesId == seriesId && m.SeasonNumber == seasonNum
+                && m.Ranges.Count > 0);
+
+            if (!hasRanges)
+            {
+                var already = uc.StaleRangeNotices.Any(n =>
+                    n.JellyfinSeriesId == seriesId && n.SeasonNumber == seasonNum && n.Kind == "split");
+
+                if (!already)
+                {
+                    dbg($"'{seriesName}' S{seasonNum}: {episodes.Count} episodes but MAL entry has {malTotal} — working out the split…");
+
+                    // Do the work now rather than waiting for the user to ask: the
+                    // notice then arrives with a split they only have to accept.
+                    var suggested = await DetectEpisodeRangesAsync(
+                        malId, jellyfinUserId, cancellationToken,
+                        Guid.TryParse(seriesId, out var sGuid) ? sGuid : null,
+                        seasonNum, jfUser).ConfigureAwait(false);
+
+                    uc.StaleRangeNotices.RemoveAll(n =>
+                        n.JellyfinSeriesId == seriesId && n.SeasonNumber == seasonNum);
+                    uc.StaleRangeNotices.Add(new Configuration.StaleRangeNotice
+                    {
+                        Kind = "split",
+                        JellyfinSeriesId = seriesId,
+                        JellyfinSeriesName = seriesName,
+                        SeasonNumber = seasonNum,
+                        MalTitle = malDisplayTitle ?? $"MAL {malId}",
+                        SuggestedRanges = suggested.Count >= 2
+                            ? suggested.Select(r => new Configuration.EpisodeRange
+                            {
+                                EpisodeFrom = r.EpisodeFrom,
+                                EpisodeTo = r.EpisodeTo,
+                                MalId = r.MalId,
+                                MalTitle = r.MalTitle,
+                                MalImageUrl = r.MalImageUrl,
+                            }).ToList()
+                            : new(),
+                    });
+                    MalSyncPlugin.Instance!.SaveConfiguration();
+
+                    dbg(suggested.Count >= 2
+                        ? $"  → proposed {suggested.Count} parts for '{seriesName}' S{seasonNum}."
+                        : $"  → could not identify the parts for '{seriesName}' S{seasonNum}; asking the user.");
+                }
+            }
         }
 
         // Season offset for absolute-numbered shows
@@ -886,6 +977,10 @@ public sealed class MalSyncService
         var jfUser = _userManager.GetUserById(Guid.Parse(userId));
         if (jfUser is null) return new();
 
+        // Episode counts for the whole library in a single query — one query per
+        // season would be hundreds of round-trips on a real anime library.
+        var episodeCounts = GetEpisodeCountsBySeason(jfUser);
+
         var jfItems = GetJfItems(jfUser);
         var animeSeries = jfItems
             .Where(i => i.Type == "Series"
@@ -903,71 +998,11 @@ public sealed class MalSyncService
             var allSeasons = seasons.Where(s => (s.IndexNumber ?? 0) >= 0).OrderBy(s => s.IndexNumber).ToList();
             if (allSeasons.Count == 0) continue;
 
-            var mappings = new List<SeasonMapping>();
-            foreach (var season in allSeasons)
-            {
-                var seasonNum = season.IndexNumber ?? 0;
-                var norm = NormalizeTitle(series.Name ?? "");
-
-                var syncOverride = GetSyncOverride(userCfg, seriesId, seasonNum);
-                var isPinned = syncOverride?.PinnedMalId != null;
-                var isBlocked = syncOverride?.Blocked == true;
-
-                string? malId = null;
-                string? malIdSource = "none";
-                string? malTitle = null;
-                string? malImageUrl = null;
-
-                if (isBlocked)
-                {
-                    malIdSource = "blocked";
-                }
-                else if (isPinned)
-                {
-                    malId = syncOverride!.PinnedMalId;
-                    malTitle = syncOverride.PinnedMalTitle;
-                    malImageUrl = syncOverride.PinnedMalImageUrl;
-                    malIdSource = "pinned";
-                }
-                else
-                {
-                    // Provider ID (most authoritative)
-                    malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList")
-                         ?? (seasonNum == 1 ? series.ProviderIds?.GetValueOrDefault("MyAnimeList") : null);
-                    if (malId is not null) malIdSource = "provider";
-
-                    // Cache
-                    if (malId is null)
-                    {
-                        var cached = GetCachedEntry(userId, norm, seasonNum, cfg.CacheTtlDays);
-                        if (cached is not null)
-                        {
-                            malId = cached.MalId;
-                            malTitle = cached.MalTitle;
-                            malImageUrl = cached.MalImageUrl;
-                            malIdSource = "cache";
-                        }
-                    }
-                }
-
-                var rangeMap = userCfg.EpisodeRangeMappings
-                    .FirstOrDefault(m => m.JellyfinSeriesId == seriesId && m.SeasonNumber == seasonNum);
-
-                mappings.Add(new SeasonMapping
-                {
-                    SeasonNumber = seasonNum,
-                    MalId = malId,
-                    MalTitle = malTitle,
-                    MalImageUrl = malImageUrl,
-                    MalIdSource = malIdSource ?? "none",
-                    Pinned = isPinned,
-                    Blocked = isBlocked,
-                    IsSpecial = seasonNum == 0,
-                    EpisodeRanges = rangeMap?.Ranges
-                        .Select(r => new EpisodeRangeInfo(r.Id, r.EpisodeFrom, r.EpisodeTo, r.MalId, r.MalTitle, r.MalImageUrl))
-                        .ToList(),
-                });
-            }
+            var mappings = allSeasons
+                .Select(season => ResolveSeasonMapping(
+                    userId, userCfg, cfg, seriesId, series, season,
+                    Guid.TryParse(season.Id, out var sGuid) && episodeCounts.TryGetValue(sGuid, out var n) ? n : 0))
+                .ToList();
 
             result.Add(new SeriesMapping
             {
@@ -978,6 +1013,257 @@ public sealed class MalSyncService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Works out which MAL entry one Jellyfin season maps to, in priority order:
+    /// a user override (pin or block), then the item's MyAnimeList provider ID,
+    /// then this user's resolved-ID cache.
+    /// </summary>
+    private SeasonMapping ResolveSeasonMapping(
+        string userId,
+        Configuration.UserMalConfig userCfg,
+        Configuration.PluginConfiguration cfg,
+        string seriesId,
+        JfItem series,
+        JfItem season,
+        int jellyfinEpisodes)
+    {
+        var seasonNum = season.IndexNumber ?? 0;
+
+        var syncOverride = GetSyncOverride(userCfg, seriesId, seasonNum);
+        var isPinned = syncOverride?.PinnedMalId != null;
+        var isBlocked = syncOverride?.Blocked == true;
+
+        string? malId = null;
+        string? malIdSource = "none";
+        string? malTitle = null;
+        string? malImageUrl = null;
+        var malEpisodes = 0;
+
+        if (isBlocked)
+        {
+            malIdSource = "blocked";
+        }
+        else if (isPinned)
+        {
+            malId = syncOverride!.PinnedMalId;
+            malTitle = syncOverride.PinnedMalTitle;
+            malImageUrl = syncOverride.PinnedMalImageUrl;
+            malIdSource = "pinned";
+        }
+        else
+        {
+            // Provider ID (most authoritative)
+            malId = season.ProviderIds?.GetValueOrDefault("MyAnimeList")
+                 ?? (seasonNum == 1 ? series.ProviderIds?.GetValueOrDefault("MyAnimeList") : null);
+            if (malId is not null) malIdSource = "provider";
+
+            // Cache. A miss recorded by a previous sync is meaningful — it is the
+            // difference between "we looked and found nothing" and "never looked".
+            if (malId is null)
+            {
+                var cached = GetCachedEntry(userId, NormalizeTitle(series.Name ?? ""), seasonNum, cfg.CacheTtlDays);
+                if (cached is null)
+                {
+                    malIdSource = "unchecked";
+                }
+                else if (cached.NoMatch || string.IsNullOrEmpty(cached.MalId))
+                {
+                    malIdSource = "nomatch";
+                }
+                else
+                {
+                    malId = cached.MalId;
+                    malTitle = cached.MalTitle;
+                    malImageUrl = cached.MalImageUrl;
+                    malEpisodes = cached.MalEpisodes;
+                    malIdSource = "cache";
+                }
+            }
+        }
+
+        var rangeMap = userCfg.EpisodeRangeMappings
+            .FirstOrDefault(m => m.JellyfinSeriesId == seriesId && m.SeasonNumber == seasonNum);
+
+        // A split is the whole answer for a season: SyncUserAsync applies the ranges
+        // and never looks at a single match. Report that, rather than a single match
+        // that is not in use — the two are alternatives, not layers.
+        if (!isBlocked && rangeMap is { Ranges.Count: > 0 })
+            malIdSource = "split";
+
+        return new SeasonMapping
+        {
+            SeasonNumber = seasonNum,
+            MalId = malId,
+            MalTitle = malTitle,
+            MalImageUrl = malImageUrl,
+            MalIdSource = malIdSource ?? "none",
+            MalEpisodes = malEpisodes,
+            JellyfinEpisodes = jellyfinEpisodes,
+            SplitSuggested = rangeMap is null or { Ranges.Count: 0 }
+                && userCfg.StaleRangeNotices.Any(n =>
+                    n.JellyfinSeriesId == seriesId && n.SeasonNumber == seasonNum && n.Kind == "split"),
+            Pinned = isPinned,
+            Blocked = isBlocked,
+            IsSpecial = seasonNum == 0,
+            EpisodeRanges = rangeMap?.Ranges
+                .Select(r => new EpisodeRangeInfo(r.Id, r.EpisodeFrom, r.EpisodeTo, r.MalId, r.MalTitle, r.MalImageUrl))
+                .ToList(),
+        };
+    }
+
+    /// <summary>
+    /// Resolves the MAL mapping for a single Jellyfin series or season without
+    /// walking the whole library. Used by the "open on MyAnimeList" lookup, which
+    /// runs on every visit to an item page and must stay cheap.
+    /// Accepts the ID of a series, a season or an episode.
+    /// </summary>
+    public SeriesMapping? GetSeriesMapping(string userId, Guid itemId)
+    {
+        EnsurePersistentCacheLoaded();
+
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var userCfg = _auth.GetOrCreateUserConfig(userId);
+
+        var jfUser = _userManager.GetUserById(Guid.Parse(userId));
+        if (jfUser is null) return null;
+
+        var item = _libraryManager.GetItemById(itemId);
+        if (item is null) return null;
+
+        // Walk up from an episode or season to the series it belongs to, so the
+        // caller can pass whatever item the user happens to be looking at.
+        int? focusSeason = null;
+        while (item is not null && item is not MediaBrowser.Controller.Entities.TV.Series)
+        {
+            if (item is MediaBrowser.Controller.Entities.TV.Season s)
+                focusSeason = s.IndexNumber ?? 0;
+            else if (item is MediaBrowser.Controller.Entities.TV.Episode ep)
+                focusSeason = ep.ParentIndexNumber;
+
+            item = item.GetParent();
+        }
+        if (item is null) return null;
+
+        var series = ToJfItem(item, jfUser);
+        var seriesId = series.Id;
+
+        var seasons = GetSeasons(item.Id, jfUser)
+            .Where(x => (x.IndexNumber ?? 0) >= 0)
+            .Where(x => focusSeason is null || (x.IndexNumber ?? 0) == focusSeason.Value)
+            .OrderBy(x => x.IndexNumber)
+            .ToList();
+
+        return new SeriesMapping
+        {
+            JellyfinSeriesId = seriesId,
+            JellyfinSeriesName = series.Name ?? "",
+            Seasons = seasons
+                .Select(season => ResolveSeasonMapping(
+                    userId, userCfg, cfg, seriesId, series, season,
+                    Guid.TryParse(season.Id, out var sGuid)
+                        ? GetEpisodes(sGuid, jfUser).Count
+                        : 0))
+                .ToList(),
+        };
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // SHARED MATCH LOOKUP (for Jellyfin's own item pages)
+    // ═════════════════════════════════════════════════════════════════════
+
+    // Item pages have no user context, so a match may only be shown there when it is
+    // the same for everyone. This maps "<normalised series>::<season>" to the agreed
+    // MAL ID, or to null where users disagree. Rebuilt on demand and thrown away
+    // whenever a match changes.
+    private Dictionary<string, string?>? _sharedMatches;
+    private readonly object _sharedMatchLock = new();
+
+    private void InvalidateSharedMatches()
+    {
+        lock (_sharedMatchLock) _sharedMatches = null;
+    }
+
+    /// <summary>Drops the shared-match snapshot after a user changed an override.</summary>
+    public void InvalidateSharedMatchesPublic() => InvalidateSharedMatches();
+
+    /// <summary>
+    /// The MyAnimeList ID for a series/season that every user agrees on, or null.
+    /// <para>
+    /// Matches are per user: one person may have corrected a season that another left
+    /// on the automatic match. Jellyfin's item pages are shared, so a link is only
+    /// offered where there is nothing to disagree about. Reads memory only — this runs
+    /// while item pages are being built and must stay cheap.
+    /// </para>
+    /// </summary>
+    public string? GetSharedMalId(string? seriesName, string? seriesId, int seasonNumber)
+    {
+        if (string.IsNullOrWhiteSpace(seriesName)) return null;
+
+        var map = _sharedMatches;
+        if (map is null)
+        {
+            lock (_sharedMatchLock)
+            {
+                map = _sharedMatches ??= BuildSharedMatches();
+            }
+        }
+
+        var key = $"{NormalizeTitle(seriesName)}::{seasonNumber}";
+        if (map.TryGetValue(key, out var id)) return id;
+
+        // A series page stands in for its first season.
+        if (seasonNumber == 0 && map.TryGetValue($"{NormalizeTitle(seriesName)}::1", out var first))
+            return first;
+
+        return null;
+    }
+
+    private Dictionary<string, string?> BuildSharedMatches()
+    {
+        EnsurePersistentCacheLoaded();
+
+        // Candidate IDs per series+season; a key resolves only when they all agree.
+        var candidates = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        void Offer(string key, string? malId)
+        {
+            if (string.IsNullOrEmpty(malId)) return;
+            if (!candidates.TryGetValue(key, out var set))
+                candidates[key] = set = new HashSet<string>(StringComparer.Ordinal);
+            set.Add(malId);
+        }
+
+        foreach (var (key, entry) in _persistentCache)
+        {
+            if (entry.NoMatch || string.IsNullOrEmpty(entry.MalId)) continue;
+            // key is "<userScope>::<normalised series>::<season>"
+            var firstSep = key.IndexOf("::", StringComparison.Ordinal);
+            if (firstSep < 0) continue;
+            Offer(key[(firstSep + 2)..], entry.MalId);
+        }
+
+        // A pin is a deliberate choice and outranks nothing here — it still only
+        // counts as one more opinion, so a disagreement still hides the link.
+        var cfg = MalSyncPlugin.Instance?.Configuration;
+        if (cfg is not null)
+        {
+            foreach (var uc in cfg.UserConfigs)
+            {
+                foreach (var ov in uc.SeriesOverrides)
+                {
+                    if (ov.Blocked || string.IsNullOrEmpty(ov.PinnedMalId)) continue;
+                    if (string.IsNullOrWhiteSpace(ov.JellyfinSeriesName)) continue;
+                    Offer($"{NormalizeTitle(ov.JellyfinSeriesName)}::{ov.SeasonNumber}", ov.PinnedMalId);
+                }
+            }
+        }
+
+        return candidates.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.Count == 1 ? kv.Value.First() : null,
+            StringComparer.Ordinal);
     }
 
     /// <summary>Searches MAL and returns results with images. Requires a valid MAL token for the user.</summary>
@@ -1111,6 +1397,7 @@ public sealed class MalSyncService
             _persistentCache.Remove(key);
         }
         _ = SavePersistentCacheAsync();
+        InvalidateSharedMatches();
     }
 
     /// <summary>
@@ -1166,15 +1453,9 @@ public sealed class MalSyncService
                 var displayTitle = node.AlternativeTitles?.En ?? node.Title ?? current;
                 chain.Add((current, displayTitle, node.MainPicture?.Medium, node.NumEpisodes));
 
-                // Find best sequel: prefer one not yet visited
-                var nextSequel = node.RelatedAnime?
-                    .Where(r => r.RelationType is "sequel"
-                             && !visited.Contains(r.Node.Id.ToString()))
-                    .FirstOrDefault();
+                var nextId = FindNextPart(node, visited);
+                if (nextId is null) break;
 
-                if (nextSequel is null) break;
-
-                var nextId = nextSequel.Node.Id.ToString();
                 visited.Add(nextId);
                 current = nextId;
             }
@@ -1186,6 +1467,17 @@ public sealed class MalSyncService
         }
 
         if (chain.Count == 0) return new();
+
+        // MyAnimeList does not always link split cours as sequels — Vanitas no Carte
+        // and Part 2 are a well-known example. When the relations lead nowhere but
+        // the season clearly holds more than the first entry covers, look the later
+        // parts up by name instead, which is how a person would find them.
+        if (chain.Count == 1)
+        {
+            var extra = await FindLaterPartsByTitleAsync(
+                chain[0].Title, chain[0].Id, visited, token, ct).ConfigureAwait(false);
+            chain.AddRange(extra);
+        }
 
         // Determine how many relative episodes the Jellyfin season actually has.
         // This lets us stop the chain early instead of mapping every sequel ever.
@@ -1245,6 +1537,127 @@ public sealed class MalSyncService
         return ranges;
     }
 
+    /// <summary>
+    /// The next part of a series within the same MyAnimeList chain.
+    /// A plain sequel is the normal link; where that is missing, a related entry whose
+    /// title is the same show plus a part marker ("Part 2", "2nd Season") is accepted
+    /// regardless of how MyAnimeList classified the relation.
+    /// </summary>
+    private static string? FindNextPart(MalNode node, ISet<string> visited)
+    {
+        var related = node.RelatedAnime;
+        if (related is null || related.Count == 0) return null;
+
+        var sequel = related.FirstOrDefault(r =>
+            r.RelationType is "sequel" && !visited.Contains(r.Node.Id.ToString()));
+        if (sequel is not null) return sequel.Node.Id.ToString();
+
+        var baseTitle = StripPartSuffix(node.AlternativeTitles?.En ?? node.Title ?? string.Empty);
+        if (baseTitle.Length < 3) return null;
+
+        foreach (var rel in related)
+        {
+            var id = rel.Node.Id.ToString();
+            if (visited.Contains(id)) continue;
+            if (rel.RelationType is "summary" or "character" or "other" or "spin_off") continue;
+
+            var title = rel.Node.AlternativeTitles?.En ?? rel.Node.Title ?? string.Empty;
+            if (LooksLikeLaterPartOf(baseTitle, title)) return id;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Searches MyAnimeList for later parts of <paramref name="firstTitle"/> and returns
+    /// them in part order. Used when the relation graph does not connect them.
+    /// </summary>
+    private async Task<List<(string Id, string Title, string? ImageUrl, int NumEpisodes)>>
+        FindLaterPartsByTitleAsync(
+            string firstTitle, string firstId, ISet<string> visited, string token, CancellationToken ct)
+    {
+        var found = new List<(int Part, string Id, string Title, string? ImageUrl, int NumEpisodes)>();
+        var baseTitle = StripPartSuffix(firstTitle);
+        if (baseTitle.Length < 3) return new();
+
+        try
+        {
+            using var http = _httpFactory.CreateClient("MalSync");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+
+            var resp = await http.GetAsync(
+                $"https://api.myanimelist.net/v2/anime?q={Uri.EscapeDataString(baseTitle)}&limit=15" +
+                "&fields=id,title,alternative_titles,num_episodes,media_type,main_picture",
+                ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return new();
+
+            var doc = await resp.Content.ReadFromJsonAsync<MalSearchPage>(cancellationToken: ct).ConfigureAwait(false);
+            foreach (var entry in doc?.Data ?? Enumerable.Empty<MalSearchEntry>())
+            {
+                var node = entry.Node;
+                var id = node.Id.ToString();
+                if (id == firstId || visited.Contains(id)) continue;
+
+                // Recap and special entries would produce bogus one-episode ranges.
+                if (node.MediaType is "music" or "special" or "ova") continue;
+                if (node.NumEpisodes > 0 && node.NumEpisodes < 4) continue;
+
+                var title = node.AlternativeTitles?.En ?? node.Title ?? string.Empty;
+                var part = GetPartNumber(baseTitle, title);
+                if (part < 2) continue;
+
+                visited.Add(id);
+                found.Add((part, id, title, node.MainPicture?.Medium, node.NumEpisodes));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Range detection: title search failed for '{Title}'", baseTitle);
+            return new();
+        }
+
+        return found
+            .OrderBy(f => f.Part)
+            .Select(f => (f.Id, f.Title, f.ImageUrl, f.NumEpisodes))
+            .ToList();
+    }
+
+    /// <summary>Removes a trailing part/season marker, e.g. "Vanitas no Carte Part 2" → "Vanitas no Carte".</summary>
+    private static string StripPartSuffix(string title)
+    {
+        var t = Regex.Replace(title, @"\s*[:\-–—]?\s*\b(?:part|cour|season)\s*\d+\s*$", "", RegexOptions.IgnoreCase);
+        t = Regex.Replace(t, @"\s+\d+(?:st|nd|rd|th)\s+season\s*$", "", RegexOptions.IgnoreCase);
+        t = Regex.Replace(t, @"\s+(?:II|III|IV|V)\s*$", "", RegexOptions.None);
+        return t.Trim();
+    }
+
+    /// <summary>
+    /// Which part of <paramref name="baseTitle"/> a title represents, or 0 when it is
+    /// not the same show. "Vanitas no Carte Part 2" against "Vanitas no Carte" gives 2.
+    /// </summary>
+    private static int GetPartNumber(string baseTitle, string title)
+    {
+        if (!LooksLikeSameShow(baseTitle, title)) return 0;
+
+        var t = NormalizeForMatch(title);
+        var m = Regex.Match(t, @"\b(?:part|cour|season)\s*(\d+)\b", RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out var n)) return n;
+
+        m = Regex.Match(t, @"\b(\d+)(?:st|nd|rd|th)\s+season\b", RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out n)) return n;
+
+        if (Regex.IsMatch(t, @"\biii\b")) return 3;
+        if (Regex.IsMatch(t, @"\bii\b")) return 2;
+
+        return 0;
+    }
+
+    private static bool LooksLikeSameShow(string baseTitle, string title)
+        => TitleScore(baseTitle, StripPartSuffix(title)) >= 0.85;
+
+    private static bool LooksLikeLaterPartOf(string baseTitle, string title)
+        => GetPartNumber(baseTitle, title) >= 2;
+
     /// <summary>Sends a Discord-compatible webhook notification.</summary>
     public async Task SendWebhookAsync(string webhookUrl, string title, string description, CancellationToken ct = default)
     {
@@ -1293,6 +1706,7 @@ public sealed class MalSyncService
                 _persistentCache.Remove(key);
         }
         _ = SavePersistentCacheAsync();
+        InvalidateSharedMatches();
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -1331,6 +1745,34 @@ public sealed class MalSyncService
             ParentId = seriesId,
         });
         return items.Select(i => ToJfItem(i, user)).ToList();
+    }
+
+    /// <summary>
+    /// Episode counts for every season the user can see, keyed by season ID.
+    /// Episodes normally hang off a Season; a flat library puts them directly under
+    /// the Series, so both parents are recorded and the caller looks up whichever
+    /// applies.
+    /// </summary>
+    private Dictionary<Guid, int> GetEpisodeCountsBySeason(User user)
+    {
+        var counts = new Dictionary<Guid, int>();
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = [BaseItemKind.Episode],
+            Recursive = true,
+            IsMissing = false,
+        });
+
+        foreach (var item in items)
+        {
+            var parent = item is MediaBrowser.Controller.Entities.TV.Episode ep && ep.SeasonId != Guid.Empty
+                ? ep.SeasonId
+                : item.ParentId;
+            if (parent == Guid.Empty) continue;
+            counts[parent] = counts.TryGetValue(parent, out var n) ? n + 1 : 1;
+        }
+
+        return counts;
     }
 
     private List<JfItem> GetEpisodes(Guid seasonId, User user)
@@ -1372,6 +1814,7 @@ public sealed class MalSyncService
             Type = item.GetType().Name,
             Path = item.Path,
             IndexNumber = item.IndexNumber,
+            ProductionYear = item.ProductionYear ?? item.PremiereDate?.Year,
             ProviderIds = item.ProviderIds?.ToDictionary(k => k.Key, v => v.Value),
             UserData = new JfUserData { Played = userData.Played },
         };
@@ -1470,7 +1913,8 @@ public sealed class MalSyncService
             using var http = _httpFactory.CreateClient("MalSync");
             foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
             var resp = await http.GetAsync(
-                $"https://api.myanimelist.net/v2/anime/{malId}?fields=num_episodes,status", ct).ConfigureAwait(false);
+                $"https://api.myanimelist.net/v2/anime/{malId}?fields=num_episodes,status,title,alternative_titles,main_picture",
+                ct).ConfigureAwait(false);
             if (resp.IsSuccessStatusCode)
                 return await resp.Content.ReadFromJsonAsync<MalAnimeInfo>(cancellationToken: ct).ConfigureAwait(false)
                        ?? new();
@@ -1541,101 +1985,186 @@ public sealed class MalSyncService
         return chain[^1].Id;
     }
 
+    /// <summary>
+    /// Extra evidence about the Jellyfin side of a match. Titles alone are often
+    /// ambiguous — remakes share a name, and MAL search happily returns music videos
+    /// and specials — so episode count and year are used to separate candidates that
+    /// score alike on the title.
+    /// </summary>
+    /// <param name="EpisodeCount">Episodes present in the Jellyfin season, 0 when unknown.</param>
+    /// <param name="Year">Jellyfin's production/premiere year, null when unknown.</param>
+    private readonly record struct MatchHints(int EpisodeCount, int? Year)
+    {
+        public static readonly MatchHints None = new(0, null);
+    }
+
+    /// <summary>
+    /// Scores one MyAnimeList search hit against the series being matched.
+    /// The title carries the decision; the other signals only nudge it, so a clearly
+    /// better title still wins over a coincidental episode-count agreement.
+    /// </summary>
+    private static double ScoreCandidate(
+        MalNode node, string query, int seasonNum, MatchHints hints, out bool isSequelCandidate)
+    {
+        var alt = node.AlternativeTitles ?? new();
+        var titles = new List<string> { node.Title ?? "" };
+        if (!string.IsNullOrEmpty(alt.En)) titles.Add(alt.En);
+        if (alt.Synonyms is not null) titles.AddRange(alt.Synonyms);
+        titles.RemoveAll(string.IsNullOrWhiteSpace);
+        if (titles.Count == 0) { isSequelCandidate = false; return 0.0; }
+
+        var allTitles = string.Join(" ", titles);
+        isSequelCandidate = IsSequelTitle(allTitles);
+
+        var baseQuery = StripSeasonSuffix(query);
+        var score = titles.Max(t => TitleScore(query, t));
+
+        if (seasonNum <= 1)
+        {
+            // A first season must match the bare title, not a sequel's.
+            var baseScore = titles.Select(StripSeasonSuffix).Max(t => TitleScore(baseQuery, t));
+            score = Math.Min(score, baseScore);
+
+            // Guard against a shared first word carrying an unrelated franchise entry.
+            var qFirst = MatchTokens(baseQuery).FirstOrDefault() ?? string.Empty;
+            if (!string.IsNullOrEmpty(qFirst))
+            {
+                var firstScore = titles
+                    .Select(t => MatchTokens(StripSeasonSuffix(t)).FirstOrDefault() ?? string.Empty)
+                    .Select(w => Similarity(qFirst, w))
+                    .DefaultIfEmpty(0).Max();
+                if (firstScore < 0.5) score *= 0.15;
+            }
+
+            if (isSequelCandidate) score *= 0.12;
+        }
+        else
+        {
+            var bases = titles.Select(StripSeasonSuffix).ToList();
+            var baseScore = bases.Max(t => TitleScore(baseQuery, t));
+            if (!ContainsSeasonNumber(allTitles, seasonNum)) baseScore *= 0.4;
+
+            var qFirst = MatchTokens(baseQuery).FirstOrDefault() ?? string.Empty;
+            if (!string.IsNullOrEmpty(qFirst))
+            {
+                var maxFirst = bases
+                    .Select(t => MatchTokens(t).FirstOrDefault() ?? string.Empty)
+                    .Select(w => Similarity(qFirst, w))
+                    .DefaultIfEmpty(0).Max();
+                if (maxFirst < 0.5) baseScore *= 0.15;
+            }
+            score = Math.Min(score, baseScore);
+        }
+
+        if (score <= 0) return 0.0;
+
+        // ── Media type ────────────────────────────────────────────────────
+        // MAL search mixes openings, specials and films into results for a TV title.
+        score *= (node.MediaType ?? string.Empty).ToLowerInvariant() switch
+        {
+            "tv" or "ona" or "" => 1.0,
+            "ova" or "special" => 0.80,
+            "movie" => hints.EpisodeCount > 1 ? 0.55 : 0.90,
+            "music" => 0.20,
+            _ => 0.95,
+        };
+
+        // ── Episode count ─────────────────────────────────────────────────
+        // MAL reports 0 while a show is still airing, and a Jellyfin season is often
+        // incomplete, so only a Jellyfin season that is *longer* than the MAL entry is
+        // evidence against the match — and even then only mildly, because that is also
+        // exactly what a multi-cour season looks like.
+        if (hints.EpisodeCount > 0 && node.NumEpisodes > 0)
+        {
+            var diff = Math.Abs(node.NumEpisodes - hints.EpisodeCount);
+            if (diff == 0) score += 0.10;
+            else if (diff <= 2) score += 0.05;
+            else if (hints.EpisodeCount > node.NumEpisodes * 2) score -= 0.06;
+        }
+
+        // ── Year ──────────────────────────────────────────────────────────
+        // The reliable way to tell a remake from the original it is named after.
+        if (hints.Year is int jfYear && node.StartSeason?.Year is int malYear && malYear > 1900)
+        {
+            var gap = Math.Abs(malYear - jfYear);
+            if (gap == 0) score += 0.08;
+            else if (gap == 1) score += 0.03;
+            else if (gap >= 4) score -= 0.12;
+        }
+
+        return Math.Clamp(score, 0.0, 1.0);
+    }
+
+    /// <summary>A MAL entry a search settled on, with enough detail to cache it usefully.</summary>
+    private sealed record MalMatch(string Id, string? Title, string? ImageUrl, int Episodes);
+
     private async Task<string?> SearchMalIdAsync(
         string title, Dictionary<string, string> headers, int seasonNum,
         double minSimilarity, CancellationToken ct,
-        ISet<string>? excludedIds = null)
+        ISet<string>? excludedIds = null,
+        MatchHints hints = default)
+        => (await SearchMalMatchAsync(title, headers, seasonNum, minSimilarity, ct, excludedIds, hints)
+                .ConfigureAwait(false))?.Id;
+
+    private async Task<MalMatch?> SearchMalMatchAsync(
+        string title, Dictionary<string, string> headers, int seasonNum,
+        double minSimilarity, CancellationToken ct,
+        ISet<string>? excludedIds = null,
+        MatchHints hints = default)
     {
         try
         {
             using var http = _httpFactory.CreateClient("MalSync");
             foreach (var (k, v) in headers) http.DefaultRequestHeaders.TryAddWithoutValidation(k, v);
+
+            // A wider net than before, and with the fields needed to judge a hit:
+            // the right entry regularly sat outside the old top five.
             var resp = await http.GetAsync(
-                $"https://api.myanimelist.net/v2/anime?q={Uri.EscapeDataString(title)}&limit=5&fields=id,title,alternative_titles",
+                $"https://api.myanimelist.net/v2/anime?q={Uri.EscapeDataString(title)}&limit=15" +
+                "&fields=id,title,alternative_titles,num_episodes,media_type,status,start_season,main_picture",
                 ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return null;
 
             var doc = await resp.Content.ReadFromJsonAsync<MalSearchPage>(cancellationToken: ct).ConfigureAwait(false);
-            string? bestId = null;
-            double bestScore = 0;
-            string? bestNonSequelId = null;
-            double bestNonSequelScore = 0;
 
-            var baseQuery = StripSeasonSuffix(title);
+            MalNode? best = null;
+            double bestScore = 0;
+            MalNode? bestNonSequel = null;
+            double bestNonSequelScore = 0;
 
             foreach (var entry in doc?.Data ?? Enumerable.Empty<MalSearchEntry>())
             {
                 var node = entry.Node;
-                var nodeId = node.Id.ToString();
-                if (excludedIds is not null && excludedIds.Contains(nodeId))
-                    continue;
+                if (excludedIds is not null && excludedIds.Contains(node.Id.ToString())) continue;
 
-                var alt = node.AlternativeTitles ?? new();
-                var candidates = new List<string> { node.Title ?? "" };
-                if (!string.IsNullOrEmpty(alt.En)) candidates.Add(alt.En);
-                if (alt.Synonyms is not null) candidates.AddRange(alt.Synonyms);
-
-                var score = candidates.Max(c => TitleSimilarity(title, c));
-                var allTitles = string.Join(" ", candidates);
-                var isSequelCandidate = IsSequelTitle(allTitles);
-
-                if (seasonNum == 1)
-                {
-                    var baseCandidates = candidates.Select(StripSeasonSuffix).ToList();
-                    var baseScore = baseCandidates.Max(c => TitleSimilarity(baseQuery, c));
-                    score = Math.Min(score, baseScore);
-
-                    var qFirst = NormalizeTitle(baseQuery).Split(' ').FirstOrDefault() ?? string.Empty;
-                    if (!string.IsNullOrEmpty(qFirst))
-                    {
-                        var firstScore = baseCandidates
-                            .Select(c => NormalizeTitle(c).Split(' ').FirstOrDefault() ?? string.Empty)
-                            .Select(w => Similarity(qFirst, w))
-                            .DefaultIfEmpty(0).Max();
-                        if (firstScore < 0.5) score *= 0.15;
-                    }
-
-                    if (isSequelCandidate) score *= 0.12;
-                }
-                else
-                {
-                    var baseQ = StripSeasonSuffix(title);
-                    var bases = candidates.Select(StripSeasonSuffix).ToList();
-                    var bScore = bases.Max(c => TitleSimilarity(baseQ, c));
-                    if (!ContainsSeasonNumber(allTitles, seasonNum)) bScore *= 0.4;
-
-                    if (bScore > 0 && baseQ.Split(' ').Length > 0)
-                    {
-                        var qFirst = baseQ.Split(' ')[0].ToLowerInvariant();
-                        var maxFirst = candidates
-                            .Select(c => StripSeasonSuffix(c).Split(' ').FirstOrDefault()?.ToLowerInvariant() ?? "")
-                            .Select(w => TitleSimilarity(qFirst, w))
-                            .DefaultIfEmpty(0).Max();
-                        if (maxFirst < 0.5) bScore *= 0.15;
-                    }
-                    score = Math.Min(score, bScore);
-                }
+                var score = ScoreCandidate(node, title, seasonNum, hints, out var isSequelCandidate);
 
                 if (score > bestScore)
                 {
                     bestScore = score;
-                    bestId = nodeId;
+                    best = node;
                 }
 
                 if (seasonNum == 1 && !isSequelCandidate && score > bestNonSequelScore)
                 {
                     bestNonSequelScore = score;
-                    bestNonSequelId = nodeId;
+                    bestNonSequel = node;
                 }
             }
 
             if (seasonNum == 1)
-                return bestNonSequelScore >= minSimilarity ? bestNonSequelId : null;
+                return bestNonSequelScore >= minSimilarity ? ToMatch(bestNonSequel) : null;
 
-            if (bestScore >= minSimilarity) return bestId;
+            if (bestScore >= minSimilarity) return ToMatch(best);
         }
         catch (Exception ex) { _logger.LogDebug(ex, "MAL search failed for '{Title}'", title); }
         return null;
+
+        static MalMatch? ToMatch(MalNode? node) => node is null ? null : new MalMatch(
+            node.Id.ToString(),
+            node.AlternativeTitles?.En is { Length: > 0 } en ? en : node.Title,
+            node.MainPicture?.Medium ?? node.MainPicture?.Large,
+            node.NumEpisodes);
     }
 
     private string? FindIdInUserList(
@@ -1654,20 +2183,20 @@ public sealed class MalSyncService
         {
             var normQ = NormalizeTitle(seriesName);
             var baseQ = NormalizeTitle(StripSeasonSuffix(seriesName));
-            var qFirst = baseQ.Split(' ').FirstOrDefault() ?? string.Empty;
+            var qFirst = MatchTokens(baseQ).FirstOrDefault() ?? string.Empty;
             foreach (var (norm, mid, _) in entries)
             {
                 if (excludedIds is not null && excludedIds.Contains(mid))
                     continue;
 
                 var isSequelCandidate = IsSequelTitle(norm);
-                var score = Similarity(normQ, norm);
+                var score = TitleScore(normQ, norm);
                 var baseT = NormalizeTitle(StripSeasonSuffix(norm));
-                score = Math.Min(score, Similarity(baseQ, baseT));
+                score = Math.Min(score, TitleScore(baseQ, baseT));
 
                 if (!string.IsNullOrEmpty(qFirst))
                 {
-                    var tFirst = baseT.Split(' ').FirstOrDefault() ?? string.Empty;
+                    var tFirst = MatchTokens(baseT).FirstOrDefault() ?? string.Empty;
                     if (Similarity(qFirst, tFirst) < 0.5) score *= 0.15;
                 }
 
@@ -1692,11 +2221,11 @@ public sealed class MalSyncService
                     continue;
 
                 var baseT = NormalizeTitle(StripSeasonSuffix(orig));
-                var score = Similarity(baseQ, baseT);
+                var score = TitleScore(baseQ, baseT);
                 if (!ContainsSeasonNumber(orig, seasonNum)) score *= 0.4;
 
-                var qParts = baseQ.Split(' ');
-                var tParts = baseT.Split(' ');
+                var qParts = MatchTokens(baseQ);
+                var tParts = MatchTokens(baseT);
                 if (qParts.Length > 0 && tParts.Length > 0
                     && Similarity(qParts[0], tParts[0]) < 0.5)
                     score *= 0.15;
@@ -1793,7 +2322,8 @@ public sealed class MalSyncService
     private string? GetCachedMalId(string userScope, string series, int season, int ttlDays)
     {
         var entry = GetCachedEntry(userScope, series, season, ttlDays);
-        return entry?.MalId;
+        if (entry is null || entry.NoMatch || string.IsNullOrEmpty(entry.MalId)) return null;
+        return entry.MalId;
     }
 
     private CacheEntry? GetCachedEntry(string userScope, string series, int season, int ttlDays)
@@ -1826,13 +2356,60 @@ public sealed class MalSyncService
     }
 
     private void SetCachedMalId(string userScope, string series, int season, string malId,
-        string? malTitle = null, string? malImageUrl = null)
+        string? malTitle = null, string? malImageUrl = null, int malEpisodes = 0)
     {
         var key = $"{userScope}::{series}::{season}";
-        var entry = new CacheEntry(malId, DateTime.UtcNow) { MalTitle = malTitle, MalImageUrl = malImageUrl };
+        var entry = new CacheEntry(malId, DateTime.UtcNow)
+        {
+            MalTitle = malTitle,
+            MalImageUrl = malImageUrl,
+            MalEpisodes = malEpisodes,
+        };
         _malIdCache[key] = entry;
         _persistentCache[key] = entry;
         _ = SavePersistentCacheAsync();
+        InvalidateSharedMatches();
+    }
+
+    /// <summary>
+    /// Records that a search for this season found nothing, so the UI can tell a real
+    /// miss apart from a season that has simply never been synced.
+    /// </summary>
+    private void SetCachedNoMatch(string userScope, string series, int season)
+    {
+        var key = $"{userScope}::{series}::{season}";
+        var entry = new CacheEntry(string.Empty, DateTime.UtcNow) { NoMatch = true };
+        _malIdCache[key] = entry;
+        _persistentCache[key] = entry;
+        _ = SavePersistentCacheAsync();
+        InvalidateSharedMatches();
+    }
+
+    /// <summary>
+    /// Keeps an existing match but fills in details the entry is missing. Matches
+    /// resolved through the sequel chain, or from an ID the user's list does not
+    /// cover, arrive without a title — which is why the library view used to show a
+    /// bare "MAL 59978". This backfills them on the next sync.
+    /// </summary>
+    private void UpdateCachedDetails(
+        string userScope, string series, int season,
+        int malEpisodes = 0, string? malTitle = null, string? malImageUrl = null)
+    {
+        var key = $"{userScope}::{series}::{season}";
+        if (!_persistentCache.TryGetValue(key, out var entry) || entry.NoMatch) return;
+
+        var updated = entry with
+        {
+            MalEpisodes = malEpisodes > 0 ? malEpisodes : entry.MalEpisodes,
+            MalTitle = string.IsNullOrWhiteSpace(entry.MalTitle) ? malTitle : entry.MalTitle,
+            MalImageUrl = string.IsNullOrWhiteSpace(entry.MalImageUrl) ? malImageUrl : entry.MalImageUrl,
+        };
+        if (updated == entry) return;
+
+        _malIdCache[key] = updated;
+        _persistentCache[key] = updated;
+        _ = SavePersistentCacheAsync();
+        InvalidateSharedMatches();
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -1846,6 +2423,79 @@ public sealed class MalSyncService
     {
         foreach (var (from, to) in UnicodeMap) t = t.Replace(from, to);
         return Regex.Replace(t.ToLowerInvariant().Trim(), @"\s+", " ");
+    }
+
+    /// <summary>
+    /// Normalises a title for *comparison only*. Punctuation and bracket noise are
+    /// dropped so "【Oshi no Ko】" and "Oshi no Ko" compare as equal.
+    /// <para>
+    /// Deliberately separate from <see cref="NormalizeTitle"/>, which is also used to
+    /// build cache keys and must keep producing the same strings as before.
+    /// </para>
+    /// </summary>
+    private static string NormalizeForMatch(string t)
+    {
+        t = NormalizeTitle(t);
+        t = Regex.Replace(t, @"[\p{P}\p{S}]+", " ");
+        return Regex.Replace(t, @"\s+", " ").Trim();
+    }
+
+    private static string[] MatchTokens(string t)
+        => NormalizeForMatch(t).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>True when <paramref name="prefix"/> is the leading run of tokens of <paramref name="full"/>.</summary>
+    private static bool IsTokenPrefix(string[] prefix, string[] full)
+    {
+        if (prefix.Length == 0 || prefix.Length > full.Length) return false;
+        for (var i = 0; i < prefix.Length; i++)
+            if (!string.Equals(prefix[i], full[i], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// How well two titles match, on 0–1.
+    /// <para>
+    /// Edit distance alone reads badly on anime titles: MyAnimeList routinely appends a
+    /// long subtitle ("Honzuki no Gekokujou: Shisho ni Naru Tame ni wa …"), which drags a
+    /// perfectly good match down to noise. So the edit-distance ratio is combined with two
+    /// structural signals — one title being the leading part of the other, and shared word
+    /// sets — and the strongest signal wins.
+    /// </para>
+    /// </summary>
+    private static double TitleScore(string query, string candidate)
+    {
+        var q = NormalizeForMatch(query);
+        var c = NormalizeForMatch(candidate);
+        if (q.Length == 0 || c.Length == 0) return 0.0;
+        if (q == c) return 1.0;
+
+        var best = Similarity(q, c);
+
+        var qt = q.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var ct = c.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        // One title being the leading part of the other is strong evidence — but a
+        // short stub must not claim a much longer title ("Attack" is not "Attack on
+        // Titan"), so the credit needs substance first and then scales with how much
+        // of the longer title the shorter one actually covers.
+        if ((qt.Length >= 2 || q.Length >= 8)
+            && (IsTokenPrefix(qt, ct) || IsTokenPrefix(ct, qt)))
+        {
+            var coverage = Math.Min(qt.Length, ct.Length) / (double)Math.Max(qt.Length, ct.Length);
+            best = Math.Max(best, 0.60 + 0.32 * coverage);
+        }
+
+        // Same words, different order or with extras in between.
+        var qs = new HashSet<string>(qt, StringComparer.Ordinal);
+        var cs = new HashSet<string>(ct, StringComparer.Ordinal);
+        if (qs.Count > 0 && cs.Count > 0)
+        {
+            var shared = qs.Count(t => cs.Contains(t));
+            var jaccard = shared / (double)(qs.Count + cs.Count - shared);
+            best = Math.Max(best, jaccard * 0.85);
+        }
+
+        return best;
     }
 
     private static double TitleSimilarity(string a, string b)
@@ -1938,7 +2588,26 @@ public sealed class MalSyncService
         public string? MalId { get; set; }
         public string? MalTitle { get; set; }
         public string? MalImageUrl { get; set; }
+
+        /// <summary>
+        /// Where the match came from: <c>split</c> (mapped to several MAL entries by
+        /// episode range, which replaces a single match), <c>pinned</c>, <c>provider</c>,
+        /// <c>cache</c>, <c>blocked</c>, <c>nomatch</c> (a sync searched and found
+        /// nothing) or <c>unchecked</c> (this season has not been resolved yet).
+        /// </summary>
         public string MalIdSource { get; set; } = "none";
+
+        /// <summary>Episode count of the matched MAL entry, 0 when unknown.</summary>
+        public int MalEpisodes { get; set; }
+
+        /// <summary>Episodes actually present in this Jellyfin season.</summary>
+        public int JellyfinEpisodes { get; set; }
+
+        /// <summary>
+        /// True when a sync found this season holds far more episodes than its MAL
+        /// entry, i.e. it probably spans several MAL entries and wants a split.
+        /// </summary>
+        public bool SplitSuggested { get; set; }
         public bool Pinned { get; set; }
         public bool Blocked { get; set; }
         public bool IsSpecial { get; set; }
@@ -1978,6 +2647,19 @@ public sealed class MalSyncService
         public string? MalTitle { get; init; }
         [JsonPropertyName("malImageUrl")]
         public string? MalImageUrl { get; init; }
+
+        /// <summary>
+        /// Set when a sync searched for this season and came back empty. Purely so the
+        /// UI can say "nothing found" instead of "not looked at yet" — the sync itself
+        /// ignores these and retries every run, so a matching improvement takes effect
+        /// immediately rather than after the cache expires.
+        /// </summary>
+        [JsonPropertyName("noMatch")]
+        public bool NoMatch { get; init; }
+
+        /// <summary>Episode count of the matched MAL entry, 0 when unknown.</summary>
+        [JsonPropertyName("malEpisodes")]
+        public int MalEpisodes { get; init; }
     }
 
     private record SyncState(int WatchedCount, string Status);
@@ -2000,6 +2682,7 @@ public sealed class MalSyncService
         [JsonPropertyName("Type")] public string? Type { get; set; }
         [JsonPropertyName("Path")] public string? Path { get; set; }
         [JsonPropertyName("IndexNumber")] public int? IndexNumber { get; set; }
+        [JsonPropertyName("ProductionYear")] public int? ProductionYear { get; set; }
         [JsonPropertyName("ProviderIds")] public Dictionary<string, string>? ProviderIds { get; set; }
         [JsonPropertyName("UserData")] public JfUserData? UserData { get; set; }
     }
@@ -2060,6 +2743,9 @@ public sealed class MalSyncService
     {
         [JsonPropertyName("num_episodes")] public int NumEpisodes { get; set; }
         [JsonPropertyName("status")] public string? Status { get; set; }
+        [JsonPropertyName("title")] public string? Title { get; set; }
+        [JsonPropertyName("alternative_titles")] public MalAltTitles? AlternativeTitles { get; set; }
+        [JsonPropertyName("main_picture")] public MalPicture? MainPicture { get; set; }
     }
 
     private sealed class MalRelatedResponse

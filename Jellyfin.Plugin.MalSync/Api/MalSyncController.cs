@@ -129,11 +129,13 @@ public sealed class MalSyncController : ControllerBase
     }
 
     // ── GET /MalSync/config ───────────────────────────────────────────────
-    /// <summary>Returns the current global plugin configuration.</summary>
+    /// <summary>Returns the current global plugin configuration (admin only).</summary>
     [HttpGet("config")]
     [Authorize]
     public IActionResult GetConfig()
     {
+        if (!IsAdmin()) return Forbid();
+
         var cfg = MalSyncPlugin.Instance!.Configuration;
         return Ok(new
         {
@@ -158,6 +160,8 @@ public sealed class MalSyncController : ControllerBase
     [Authorize]
     public IActionResult SaveConfig([FromBody] ConfigRequest body)
     {
+        if (!IsAdmin()) return Forbid();
+
         var cfg = MalSyncPlugin.Instance!.Configuration;
 
         if (!string.IsNullOrWhiteSpace(body.MalClientId))
@@ -187,26 +191,10 @@ public sealed class MalSyncController : ControllerBase
 
         MalSyncPlugin.Instance.SaveConfiguration();
 
-        // Apply the new schedule to the running task immediately.
-        var task = _taskManager.ScheduledTasks
-            .FirstOrDefault(t => t.ScheduledTask is Tasks.MalSyncTask);
-        if (task is not null)
-        {
-            task.Triggers = cfg.SyncUseInterval
-                ? [new TaskTriggerInfo
-                  {
-                      Type = TaskTriggerInfoType.IntervalTrigger,
-                      IntervalTicks = TimeSpan.FromMinutes(cfg.SyncIntervalMinutes).Ticks,
-                  }]
-                : [new TaskTriggerInfo
-                  {
-                      Type = TaskTriggerInfoType.DailyTrigger,
-                      TimeOfDayTicks = TimeSpan
-                          .FromHours(cfg.SyncHour)
-                          .Add(TimeSpan.FromMinutes(cfg.SyncMinute))
-                          .Ticks,
-                  }];
-        }
+        // The schedule deliberately is NOT touched here. It belongs to Jellyfin's
+        // Scheduled Tasks, which is where the settings page sends administrators —
+        // rewriting the triggers on every save would silently undo a schedule set
+        // there and put the task back on this plugin's defaults.
 
         return Ok(new { message = "Configuration saved." });
     }
@@ -465,6 +453,9 @@ public sealed class MalSyncController : ControllerBase
                 malTitle = s.MalTitle,
                 malImageUrl = s.MalImageUrl,
                 malIdSource = s.MalIdSource,
+                malEpisodes = s.MalEpisodes,
+                jellyfinEpisodes = s.JellyfinEpisodes,
+                splitSuggested = s.SplitSuggested,
                 pinned = s.Pinned,
                 blocked = s.Blocked,
                 isSpecial = s.IsSpecial,
@@ -481,6 +472,46 @@ public sealed class MalSyncController : ControllerBase
         });
 
         return Ok(new { series = result });
+    }
+
+    // ── GET /MalSync/series/{itemId}/mal ─────────────────────────────────
+    /// <summary>
+    /// Resolves the MyAnimeList entry (or entries, one per season) that a single
+    /// Jellyfin item maps to for the calling user. Accepts a series, season or
+    /// episode ID so a caller can pass whatever the user is currently viewing.
+    /// Kept deliberately cheap: it looks at one series instead of the whole library.
+    /// </summary>
+    [HttpGet("series/{itemId}/mal")]
+    [Authorize]
+    public IActionResult GetSeriesMalLink(string itemId)
+    {
+        if (!Guid.TryParse(itemId, out var guid))
+            return BadRequest(new { error = "itemId must be a GUID." });
+
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return Unauthorized();
+
+        var mapping = _sync.GetSeriesMapping(userId, guid);
+        if (mapping is null) return NotFound(new { error = "Item not found." });
+
+        var seasons = mapping.Seasons
+            .Where(s => !string.IsNullOrEmpty(s.MalId) && !s.Blocked)
+            .Select(s => new
+            {
+                seasonNumber = s.SeasonNumber,
+                malId = s.MalId,
+                malTitle = s.MalTitle,
+                malUrl = $"https://myanimelist.net/anime/{s.MalId}",
+                source = s.MalIdSource,
+            })
+            .ToList();
+
+        return Ok(new
+        {
+            jellyfinSeriesId = mapping.JellyfinSeriesId,
+            jellyfinSeriesName = mapping.JellyfinSeriesName,
+            seasons,
+        });
     }
 
     // ── GET /MalSync/mal/search ───────────────────────────────────────────
@@ -566,6 +597,8 @@ public sealed class MalSyncController : ControllerBase
         }
 
         MalSyncPlugin.Instance!.SaveConfiguration();
+        // Item pages show a match only when all users agree on it; that just changed.
+        _sync.InvalidateSharedMatchesPublic();
         return Ok(new { message = "Override saved." });
     }
 
@@ -778,7 +811,184 @@ public sealed class MalSyncController : ControllerBase
         try { await importTask.ConfigureAwait(false); } catch { }
     }
 
+    // ── GET /MalSync/setup ────────────────────────────────────────────────
+    /// <summary>
+    /// Everything the UI needs to decide what the calling user can do next:
+    /// which server-side prerequisites are met, whether MAL is connected and
+    /// whether import profiles exist. Drives the setup checklist and the
+    /// enabling/disabling of the Sync and Import sections.
+    /// </summary>
+    [HttpGet("setup")]
+    [Authorize]
+    public IActionResult GetSetupState()
+    {
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var userId = GetUserId();
+        var uc = _auth.GetOrCreateUserConfig(userId);
+        var hasToken = !string.IsNullOrEmpty(uc.MalAccessToken);
+
+        return Ok(new
+        {
+            isAdmin = IsAdmin(),
+
+            // Server-side prerequisites (managed by an administrator)
+            clientIdConfigured = !string.IsNullOrWhiteSpace(cfg.MalClientId),
+            animePathsConfigured = cfg.GetAnimePaths().Length > 0,
+            jellyseerrConfigured = !string.IsNullOrWhiteSpace(cfg.JellyseerrUrl)
+                                && !string.IsNullOrWhiteSpace(cfg.JellyseerrApiKey),
+
+            // Per-user state
+            malConnected = hasToken,
+            malUsername = uc.MalUsername,
+            tokenExpires = hasToken ? uc.TokenExpiresAt.ToString("o") : null,
+            tokenExpired = hasToken && uc.TokenExpiresAt <= DateTime.UtcNow,
+            profileCount = uc.JellyseerrProfiles.Count,
+            overrideCount = uc.SeriesOverrides.Count,
+            rangeCount = uc.EpisodeRangeMappings.Count,
+            importBlockCount = uc.ImportBlocks.Count,
+            staleNoticeCount = uc.StaleRangeNotices.Count,
+
+            syncTask = DescribeTask("MalSync"),
+            importTask = DescribeTask("MalJellyseerrImport"),
+        });
+    }
+
+    // ── GET /MalSync/admin/overview ───────────────────────────────────────
+    /// <summary>
+    /// Admin diagnostics: per-user connection state and scheduled task health.
+    /// Reads local state only — no outbound network calls, so it stays fast.
+    /// </summary>
+    [HttpGet("admin/overview")]
+    [Authorize]
+    public IActionResult GetAdminOverview()
+    {
+        if (!IsAdmin()) return Forbid();
+
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var now = DateTime.UtcNow;
+
+        var users = _userManager.Users.Select(u =>
+        {
+            var id = u.Id.ToString();
+            var uc = cfg.UserConfigs.FirstOrDefault(c =>
+                string.Equals(c.UserId, id, StringComparison.OrdinalIgnoreCase));
+            var hasToken = !string.IsNullOrEmpty(uc?.MalAccessToken);
+
+            return new
+            {
+                userId = id,
+                userName = u.Username,
+                isAdmin = u.HasPermission(PermissionKind.IsAdministrator),
+                malConnected = hasToken,
+                malUsername = uc?.MalUsername ?? string.Empty,
+                tokenExpires = hasToken ? uc!.TokenExpiresAt.ToString("o") : null,
+                tokenExpired = hasToken && uc!.TokenExpiresAt <= now,
+                profileCount = uc?.JellyseerrProfiles.Count ?? 0,
+                overrideCount = uc?.SeriesOverrides.Count ?? 0,
+                importBlockCount = uc?.ImportBlocks.Count ?? 0,
+                webhookConfigured = !string.IsNullOrWhiteSpace(uc?.WebhookUrl),
+            };
+        })
+        .OrderByDescending(u => u.malConnected)
+        .ThenBy(u => u.userName, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+        return Ok(new
+        {
+            clientIdConfigured = !string.IsNullOrWhiteSpace(cfg.MalClientId),
+            animePathCount = cfg.GetAnimePaths().Length,
+            jellyseerrConfigured = !string.IsNullOrWhiteSpace(cfg.JellyseerrUrl)
+                                && !string.IsNullOrWhiteSpace(cfg.JellyseerrApiKey),
+            jellyseerrUrl = cfg.JellyseerrUrl,
+            users,
+            syncTask = DescribeTask("MalSync"),
+            importTask = DescribeTask("MalJellyseerrImport"),
+        });
+    }
+
+    // ── POST /MalSync/admin/probe ─────────────────────────────────────────
+    /// <summary>
+    /// Admin diagnostics: actively contacts MyAnimeList and Jellyseerr to verify
+    /// the stored credentials, and reports which Jellyfin users Jellyseerr knows.
+    /// </summary>
+    [HttpPost("admin/probe")]
+    [Authorize]
+    public async Task<IActionResult> RunAdminProbe()
+    {
+        if (!IsAdmin()) return Forbid();
+
+        var cfg = MalSyncPlugin.Instance!.Configuration;
+        var ct = HttpContext.RequestAborted;
+
+        var (malOk, malMessage) = await _auth.ProbeClientIdAsync(cfg.MalClientId, ct).ConfigureAwait(false);
+        var seerr = await _jellyseerr.ProbeAsync(ct).ConfigureAwait(false);
+
+        // Which Jellyfin accounts does Jellyseerr actually know? Imports are skipped
+        // for users it cannot map, so this is the single most useful import check.
+        var unlinked = new List<string>();
+        if (seerr.Ok)
+        {
+            foreach (var u in _userManager.Users)
+            {
+                var uc = cfg.UserConfigs.FirstOrDefault(c =>
+                    string.Equals(c.UserId, u.Id.ToString(), StringComparison.OrdinalIgnoreCase));
+                // Only users who would actually be imported for are worth reporting.
+                if (uc is null || string.IsNullOrEmpty(uc.MalAccessToken) || uc.JellyseerrProfiles.Count == 0)
+                    continue;
+
+                var needle = u.Id.ToString("N").ToLowerInvariant();
+                if (!seerr.MappedJellyfinUserIds.Contains(needle))
+                    unlinked.Add(u.Username);
+            }
+        }
+
+        return Ok(new
+        {
+            mal = new { ok = malOk, message = malMessage },
+            jellyseerr = new
+            {
+                ok = seerr.Ok,
+                message = seerr.Message,
+                version = seerr.Version,
+                userCount = seerr.UserCount,
+                configured = !string.IsNullOrWhiteSpace(cfg.JellyseerrUrl)
+                          && !string.IsNullOrWhiteSpace(cfg.JellyseerrApiKey),
+                unlinkedUsers = unlinked,
+            },
+        });
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Summarises a scheduled task for the UI: when it last ran, how it ended and
+    /// when it is due next. Returns null when the task is not registered.
+    /// </summary>
+    private object? DescribeTask(string key)
+    {
+        var task = _taskManager.ScheduledTasks
+            .FirstOrDefault(t => string.Equals(t.ScheduledTask.Key, key, StringComparison.Ordinal));
+        if (task is null) return null;
+
+        var last = task.LastExecutionResult;
+        return new
+        {
+            name = task.Name,
+            state = task.State.ToString(),
+            running = task.State == TaskState.Running,
+            progress = task.CurrentProgress,
+            lastRun = last?.EndTimeUtc.ToString("o"),
+            lastStatus = last?.Status.ToString(),
+            lastError = last?.ErrorMessage,
+        };
+    }
+
+    private bool IsAdmin()
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId) || !Guid.TryParse(userId, out var guid)) return false;
+        return _userManager.GetUserById(guid)?.HasPermission(PermissionKind.IsAdministrator) ?? false;
+    }
 
     private string GetUserId()
     {

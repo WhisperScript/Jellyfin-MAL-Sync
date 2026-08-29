@@ -188,14 +188,34 @@ public class EpisodeRange
     [JsonPropertyName("malImageUrl")] public string? MalImageUrl { get; set; }
 }
 
-/// <summary>Notification shown on the plugin page when episode ranges are likely outdated.</summary>
+/// <summary>
+/// Notification shown on the plugin page when a Jellyfin season and its MyAnimeList
+/// entry disagree about how many episodes exist.
+/// </summary>
 public class StaleRangeNotice
 {
+    /// <summary>
+    /// What was noticed. <c>"stale"</c> — the season already has a split and has grown
+    /// past what it covers. <c>"split"</c> — the season maps to a single MAL entry but
+    /// holds far more episodes than that entry has, so it probably spans several.
+    /// Absent in notices written by older versions, which were always the stale kind.
+    /// </summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = "stale";
+
     [JsonPropertyName("jellyfinSeriesId")]   public string   JellyfinSeriesId   { get; set; } = string.Empty;
     [JsonPropertyName("jellyfinSeriesName")] public string   JellyfinSeriesName { get; set; } = string.Empty;
     [JsonPropertyName("seasonNumber")]       public int      SeasonNumber       { get; set; }
     [JsonPropertyName("malTitle")]           public string   MalTitle           { get; set; } = string.Empty;
     [JsonPropertyName("detectedAt")]         public DateTime DetectedAt         { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// The split the sync worked out by itself, ready for the user to accept.
+    /// Empty when the parts could not be identified, in which case the UI falls back
+    /// to asking for them manually.
+    /// </summary>
+    [JsonPropertyName("suggestedRanges")]
+    public List<EpisodeRange> SuggestedRanges { get; set; } = new();
 }
 
 /// <summary>Block a specific MAL anime from being requested during Jellyseerr import.</summary>
