@@ -47,7 +47,9 @@
 .ms-root *, .ms-root *::before, .ms-root *::after { box-sizing: border-box; }
 
 /* Jellyfin wraps plugin pages in a narrow column; let the page breathe. */
-:has(> .ms-root) { max-width: none !important; width: 100% !important; }
+:has(> .ms-root) { max-width: none !important; }
+/* The dashboard shell already clears its header; library page padding would add a second gap. */
+.dashboardDocument .libraryPage:has(> .ms-root) { padding-top: 0 !important; }
 
 /* ── Page header ──────────────────────────────────────────────────────── */
 .ms-header {
@@ -86,7 +88,7 @@
 .ms-card-note { font-size: .85em; opacity: .6; line-height: 1.5; margin: 0 0 1em; }
 
 /* Two-column layout that collapses on narrow screens. */
-.ms-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30em), 1fr)); gap: 1.15em; align-items: start; }
+.ms-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26em), 1fr)); gap: 1.15em; align-items: start; }
 .ms-grid > .ms-card { margin-bottom: 0; }
 .ms-two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15em), 1fr)); gap: 0 1.2em; }
 
@@ -248,6 +250,7 @@
 
 /* ── Collapsible "advanced" disclosure ────────────────────────────────── */
 .ms-disclosure { border-top: 1px solid var(--ms-line-soft); margin-top: 1.2em; padding-top: .3em; }
+.ms-disclosure:first-child { border-top: 0; margin-top: -.6em; margin-bottom: -.6em; padding-top: 0; }
 .ms-disclosure-btn {
     display: flex; align-items: center; gap: .5em;
     width: 100%; padding: .6em 0;
@@ -1124,12 +1127,14 @@
         });
     }
 
-    /** Widens Jellyfin's narrow content wrapper so the page can use the width. */
+    /**
+     * Lifts Jellyfin's width cap so the page can use the space. Width stays auto:
+     * the dashboard offsets .page with left: 240px, so 100% would overflow by that much.
+     */
     function expandContainer(root) {
         var node = root.parentElement;
         while (node && node !== document.body) {
             node.style.setProperty('max-width', 'none', 'important');
-            node.style.setProperty('width', '100%', 'important');
             var tag = node.tagName.toLowerCase();
             if (tag === 'main' || node.classList.contains('scrollY')
                 || node.classList.contains('skinBody') || node.dataset.role === 'page') break;

@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "changelog": "Fixes the page layout on Jellyfin 12.4.\n\n- Pages no longer run off the right edge of the dashboard\n- Removed the large gap above the page in the dashboard\n- Removed the empty strip at the top of the \"Titles that should never be requested\" card\n- Settings cards fit side by side again",
+        "targetAbi": "12.4.0.0",
+        "version": "1.4.2.0",
+        "sourceUrl": "",
+        "checksum": "",
+        "timestamp": ""
+      },
+      {
         "changelog": "Runs on Jellyfin 12.4. This release needs Jellyfin 12.4 or newer and .NET 10.\n\nJELLYFIN 12.4\n- The MAL Sync pages failed with HTTP 401 because Jellyfin 12.4 rejects the old X-Emby-Token header. They now use the Authorization header\n- The admin overview and diagnostics use the user API that replaced the one removed in 12.4\n\nIMPORTS\n- Jellyseerr override rules are applied by the plugin for admin accounts, because Jellyseerr skips them for those\n- Shows without a TVDB ID are not requested, since Jellyseerr deletes those requests again straight away\n- Failed requests wait before the next attempt: 6 hours, 1 day, 3 days, then weekly\n- A repeated problem is reported again after a week at the earliest, and a stale season notice is only sent once",
         "targetAbi": "12.4.0.0",
         "version": "1.4.1.0",
