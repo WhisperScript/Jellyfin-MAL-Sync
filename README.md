@@ -3,7 +3,7 @@
 [![Build & Release](https://github.com/WhisperScript/Jellyfin-MAL-Sync/actions/workflows/build.yml/badge.svg)](https://github.com/WhisperScript/Jellyfin-MAL-Sync/actions/workflows/build.yml)
 [![Latest Release](https://img.shields.io/github/v/release/WhisperScript/Jellyfin-MAL-Sync?label=latest)](https://github.com/WhisperScript/Jellyfin-MAL-Sync/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Jellyfin](https://img.shields.io/badge/Jellyfin-10.11%2B-00a4dc?logo=jellyfin)
+![Jellyfin](https://img.shields.io/badge/Jellyfin-12.4%2B-00a4dc?logo=jellyfin)
 
 Syncs Jellyfin anime watch progress with **MyAnimeList** per user and optionally imports MAL entries into **Jellyseerr** as user-specific requests.
 
@@ -41,7 +41,7 @@ Syncs Jellyfin anime watch progress with **MyAnimeList** per user and optionally
 
 ## ✅ Requirements
 
-- Jellyfin **10.11+**
+- Jellyfin **12.4+**
 - A MAL API app Client ID from <https://myanimelist.net/apiconfig>
 - Jellyseerr (optional, only for MAL → Jellyseerr import)
 

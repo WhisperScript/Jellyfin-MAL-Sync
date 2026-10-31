@@ -675,7 +675,8 @@
 
     function authHeaders() {
         var h = {};
-        if (window.ApiClient && ApiClient.accessToken) h['X-Emby-Token'] = ApiClient.accessToken();
+        // X-Emby-Token is rejected unless the server enables legacy authorization.
+        if (window.ApiClient && ApiClient.accessToken) h.Authorization = 'MediaBrowser Token="' + ApiClient.accessToken() + '"';
         return h;
     }
 
@@ -1191,5 +1192,6 @@
         initTabs: initTabs,
         initDisclosures: initDisclosures,
         serverBase: serverBase,
+        authHeaders: authHeaders,
     };
 }());

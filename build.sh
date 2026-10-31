@@ -24,11 +24,11 @@ if ! command -v dotnet &>/dev/null; then
     echo "  # Ubuntu/Debian:"
     echo "  wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh"
     echo "  chmod +x dotnet-install.sh"
-    echo "  ./dotnet-install.sh --channel 8.0"
+    echo "  ./dotnet-install.sh --channel 10.0"
     echo "  export PATH=\"\$HOME/.dotnet:\$PATH\""
     echo ""
     echo "  # Or via apt (Ubuntu 22.04+):"
-    echo "  sudo apt-get install -y dotnet-sdk-8.0"
+    echo "  sudo apt-get install -y dotnet-sdk-10.0"
     echo ""
     exit 1
 fi

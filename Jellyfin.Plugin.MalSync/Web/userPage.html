@@ -1209,7 +1209,7 @@
 
             try {
                 var res = await fetch(U.serverBase() + '/MalSync/import/preview/stream', {
-                    headers: { 'X-Emby-Token': ApiClient.accessToken() },
+                    headers: U.authHeaders(),
                 });
                 if (!res.ok) throw new Error('The server responded with HTTP ' + res.status + '.');
 

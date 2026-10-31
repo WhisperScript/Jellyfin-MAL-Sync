@@ -139,7 +139,7 @@
         pending++;
 
         fetch(base() + '/MalSync/series/' + itemId + '/mal', {
-            headers: { 'X-Emby-Token': ApiClient.accessToken() },
+            headers: { Authorization: 'MediaBrowser Token="' + ApiClient.accessToken() + '"' },
         })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (data) {

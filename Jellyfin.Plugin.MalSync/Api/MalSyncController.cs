@@ -867,7 +867,7 @@ public sealed class MalSyncController : ControllerBase
         var cfg = MalSyncPlugin.Instance!.Configuration;
         var now = DateTime.UtcNow;
 
-        var users = _userManager.Users.Select(u =>
+        var users = _userManager.GetUsers().Select(u =>
         {
             var id = u.Id.ToString();
             var uc = cfg.UserConfigs.FirstOrDefault(c =>
@@ -928,7 +928,7 @@ public sealed class MalSyncController : ControllerBase
         var unlinked = new List<string>();
         if (seerr.Ok)
         {
-            foreach (var u in _userManager.Users)
+            foreach (var u in _userManager.GetUsers())
             {
                 var uc = cfg.UserConfigs.FirstOrDefault(c =>
                     string.Equals(c.UserId, u.Id.ToString(), StringComparison.OrdinalIgnoreCase));

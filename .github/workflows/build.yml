@@ -24,7 +24,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore & build
         run: |
@@ -39,13 +39,13 @@ jobs:
         run: |
           mkdir -p release
           cp dist/Jellyfin.Plugin.MalSync.dll release/
-          cd release && zip Jellyfin.Plugin.MalSync_10.11.0.zip Jellyfin.Plugin.MalSync.dll
+          cd release && zip Jellyfin.Plugin.MalSync_12.4.0.zip Jellyfin.Plugin.MalSync.dll
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellyfin.Plugin.MalSync
-          path: release/Jellyfin.Plugin.MalSync_10.11.0.zip
+          path: release/Jellyfin.Plugin.MalSync_12.4.0.zip
 
       # ── Dev pre-release (triggered by non-main branch pushes, not tags) ───
       - name: Publish dev pre-release
@@ -60,9 +60,9 @@ jobs:
         run: |
           SAFE_BRANCH="${BRANCH//\//-}"
           TAG="dev-${SAFE_BRANCH}"
-          CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_10.11.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
+          CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_12.4.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
-          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_10.11.0.zip"
+          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_12.4.0.zip"
 
           # Delete existing dev pre-release for this branch (ignore errors)
           gh release delete "$TAG" --repo "$REPO" --yes 2>/dev/null || true
@@ -70,7 +70,7 @@ jobs:
 
           # Create new pre-release
           gh release create "$TAG" \
-            release/Jellyfin.Plugin.MalSync_10.11.0.zip \
+            release/Jellyfin.Plugin.MalSync_12.4.0.zip \
             --repo "$REPO" \
             --title "Dev build: ${BRANCH}" \
             --notes "Automated dev build from branch \`${BRANCH}\`. Not for production use." \
@@ -95,7 +95,7 @@ jobs:
               "versions": [
                 {
                   "changelog": "",
-                  "targetAbi": "10.11.0.0",
+                  "targetAbi": "12.4.0.0",
                   "version": version,
                   "sourceUrl": source_url,
                   "checksum": checksum,
@@ -123,9 +123,9 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           VERSION=$(grep -oP '(?<=<Version>)[^<]+' Jellyfin.Plugin.MalSync/Jellyfin.Plugin.MalSync.csproj)
-          CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_10.11.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
+          CHECKSUM=$(md5sum release/Jellyfin.Plugin.MalSync_12.4.0.zip | awk '{print $1}' | tr '[:lower:]' '[:upper:]')
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S")
-          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_10.11.0.zip"
+          SOURCE_URL="https://github.com/${REPO}/releases/download/${TAG}/Jellyfin.Plugin.MalSync_12.4.0.zip"
           python3 - "$VERSION" "$CHECKSUM" "$SOURCE_URL" "$TIMESTAMP" <<'PYEOF'
           import json, sys
           version, checksum, source_url, timestamp = sys.argv[1:]
@@ -143,7 +143,7 @@ jobs:
           else:
               m[0]['versions'].insert(0, {
                   'changelog': '',
-                  'targetAbi': '10.11.0.0',
+                  'targetAbi': '12.4.0.0',
                   'version': version,
                   'sourceUrl': source_url,
                   'checksum': checksum,
@@ -181,6 +181,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/Jellyfin.Plugin.MalSync_10.11.0.zip
+          files: release/Jellyfin.Plugin.MalSync_12.4.0.zip
           generate_release_notes: true
 
