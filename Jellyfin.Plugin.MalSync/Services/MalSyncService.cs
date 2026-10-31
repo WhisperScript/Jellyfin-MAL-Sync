@@ -213,15 +213,18 @@ public sealed class MalSyncService
                         dryRun, malHeaders, Log, Dbg,
                         notice =>
                         {
-                            // Replace any existing notice for the same series+season (no duplicates)
+                            // Only notify the first time; later syncs just refresh the stored notice
+                            var alreadyNotified = userCfg.StaleRangeNotices.Any(n =>
+                                n.JellyfinSeriesId == notice.JellyfinSeriesId &&
+                                n.SeasonNumber     == notice.SeasonNumber &&
+                                string.Equals(n.MalTitle, notice.MalTitle, StringComparison.OrdinalIgnoreCase));
                             userCfg.StaleRangeNotices.RemoveAll(n =>
                                 n.JellyfinSeriesId == notice.JellyfinSeriesId &&
                                 n.SeasonNumber     == notice.SeasonNumber);
                             userCfg.StaleRangeNotices.Add(notice);
                             MalSyncPlugin.Instance!.SaveConfiguration();
 
-                            // Send webhook notification if configured and enabled
-                            if (!string.IsNullOrEmpty(userCfg.WebhookUrl) && userCfg.WebhookOnStaleRanges)
+                            if (!alreadyNotified && !string.IsNullOrEmpty(userCfg.WebhookUrl) && userCfg.WebhookOnStaleRanges)
                             {
                                 var msg = $"**{notice.JellyfinSeriesName}** — season {notice.SeasonNumber}\n" +
                                           $"Jellyfin has more episodes than **{notice.MalTitle}** covers on MyAnimeList.\n" +

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using Jellyfin.Plugin.MalSync.Configuration;
+using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.MalSync.Services;
@@ -25,14 +26,136 @@ public sealed class JellyseerrImportService
     private static readonly ConcurrentDictionary<string, string> _lastImportSummary = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan _recentSubmittedTtl = TimeSpan.FromMinutes(30);
 
+    private readonly string _stateFilePath;
+    private readonly object _stateLock = new();
+    private ImportState? _state;
+
     public JellyseerrImportService(
         IHttpClientFactory httpFactory,
         MalAuthService auth,
+        IApplicationPaths appPaths,
         ILogger<JellyseerrImportService> logger)
     {
         _httpFactory = httpFactory;
         _auth = auth;
         _logger = logger;
+        _stateFilePath = Path.Combine(appPaths.DataPath, "plugins", "MalSync", "import-state.json");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PERSISTENT IMPORT STATE (failure cool-down + notified problems)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private sealed class FailureRecord
+    {
+        public int      Attempts       { get; set; }
+        public DateTime LastAttemptUtc { get; set; }
+        public string?  Reason         { get; set; }
+    }
+
+    private sealed class ImportState
+    {
+        public Dictionary<string, FailureRecord> Failures         { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, DateTime>      NotifiedProblems { get; set; } = new(StringComparer.Ordinal);
+    }
+
+    private static readonly TimeSpan _problemRenotifyAfter = TimeSpan.FromDays(7);
+
+    /// <summary>How long a failed request is left alone: 6h, 1d, 3d, then weekly.</summary>
+    private static TimeSpan FailureCooldown(int attempts) => attempts switch
+    {
+        <= 1 => TimeSpan.FromHours(6),
+        2    => TimeSpan.FromDays(1),
+        3    => TimeSpan.FromDays(3),
+        _    => TimeSpan.FromDays(7),
+    };
+
+    private ImportState LoadStateLocked()
+    {
+        if (_state is not null) return _state;
+        try
+        {
+            if (File.Exists(_stateFilePath))
+                _state = JsonSerializer.Deserialize<ImportState>(File.ReadAllText(_stateFilePath));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read import state, starting with an empty one.");
+        }
+        _state ??= new ImportState();
+
+        var now = DateTime.UtcNow;
+        foreach (var k in _state.Failures.Where(kv => now - kv.Value.LastAttemptUtc > TimeSpan.FromDays(30)).Select(kv => kv.Key).ToList())
+            _state.Failures.Remove(k);
+        foreach (var k in _state.NotifiedProblems.Where(kv => now - kv.Value > _problemRenotifyAfter).Select(kv => kv.Key).ToList())
+            _state.NotifiedProblems.Remove(k);
+        return _state;
+    }
+
+    private void SaveStateLocked()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_stateFilePath)!);
+            File.WriteAllText(_stateFilePath, JsonSerializer.Serialize(_state));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not save import state.");
+        }
+    }
+
+    /// <summary>When a request that failed before may be tried again, or null if it is free to run.</summary>
+    private DateTime? GetRetryAfter(string userId, string importKey, out string? reason)
+    {
+        lock (_stateLock)
+        {
+            reason = null;
+            if (!LoadStateLocked().Failures.TryGetValue($"{userId}::{importKey}", out var f)) return null;
+            reason = f.Reason;
+            var next = f.LastAttemptUtc + FailureCooldown(f.Attempts);
+            return next > DateTime.UtcNow ? next : null;
+        }
+    }
+
+    private void RecordFailure(string userId, string importKey, string? reason)
+    {
+        lock (_stateLock)
+        {
+            var failures = LoadStateLocked().Failures;
+            var key = $"{userId}::{importKey}";
+            failures.TryGetValue(key, out var f);
+            failures[key] = new FailureRecord
+            {
+                Attempts = (f?.Attempts ?? 0) + 1,
+                LastAttemptUtc = DateTime.UtcNow,
+                Reason = reason,
+            };
+            SaveStateLocked();
+        }
+    }
+
+    private void ClearFailure(string userId, string importKey)
+    {
+        lock (_stateLock)
+        {
+            if (LoadStateLocked().Failures.Remove($"{userId}::{importKey}"))
+                SaveStateLocked();
+        }
+    }
+
+    /// <summary>True the first time a problem line is seen (and again after a week).</summary>
+    private bool IsNewProblem(string userId, string line)
+    {
+        lock (_stateLock)
+        {
+            var notified = LoadStateLocked().NotifiedProblems;
+            var key = $"{userId}::{line}";
+            if (notified.ContainsKey(key)) return false;
+            notified[key] = DateTime.UtcNow;
+            SaveStateLocked();
+            return true;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -202,6 +325,13 @@ public sealed class JellyseerrImportService
             _logger.LogInformation("Anime routing: serverId={ServerId} profileId={Profile} rootFolder={Folder}",
                 sonarrServerId, animeProfileId, animeDirectory);
 
+        // ── Override rules: Jellyseerr only applies them itself for non-admin requesters.
+        // For an admin account they are skipped, so the plugin applies them and sends the
+        // result as explicit root folder / profile / tags.
+        var overrideRules = await FetchOverrideRulesAsync(effectiveUrl, effectiveApiKey, cancellationToken).ConfigureAwait(false);
+        if (overrideRules.Count > 0)
+            _logger.LogInformation("Loaded {Count} Jellyseerr override rule(s).", overrideRules.Count);
+
         // ── Fetch existing Jellyseerr requests (pending/approved/declined) ──
         Log("Fetching existing Jellyseerr requests…");
         var existingRequests = await FetchExistingJellyseerrRequestsAsync(
@@ -227,8 +357,9 @@ public sealed class JellyseerrImportService
         Log("MAL details pre-fetched.");
 
         int submitted = 0, skipped = 0, failed = 0, processedCount = 0;
-        // Cache TMDB→(seasons, tvdbId, isAnime, rawSeasons) lookups to avoid redundant HTTP calls and transient failures
-        var tvDetailCache = new Dictionary<int, (List<int> Seasons, int? TvdbId, bool IsAnime, List<JellyseerrTvSeason> RawSeasons)>();
+        var createdRequests = new List<string>();
+        // Cache TMDB TV detail lookups to avoid redundant HTTP calls and transient failures
+        var tvDetailCache = new Dictionary<int, TvInfo>();
 
         foreach (var entry in toRequest)
         {
@@ -326,6 +457,26 @@ public sealed class JellyseerrImportService
             }
 
             var requestAllSeasons = profile.RequestAllSeasons;
+
+            if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!tvDetail.Loaded)
+                {
+                    Log($"[SKIP] '{title}' → could not load the TMDB details from Jellyseerr; will retry on the next run.");
+                    skipped++;
+                    continue;
+                }
+
+                // Jellyseerr hands TV requests to Sonarr by TVDB ID. Without one it accepts
+                // the request and deletes it again right away, so asking is pointless.
+                if (!tvDetail.TvdbId.HasValue)
+                {
+                    Log($"[SKIP] '{title}' → TMDB {searchResult.Id} ('{searchResult.Name ?? searchResult.Title}') has no TVDB ID, so Sonarr cannot add it. "
+                      + "Checked again on every run; nothing is requested until TMDB lists one.");
+                    skipped++;
+                    continue;
+                }
+            }
 
             var importKey = string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase)
                 ? (requestAllSeasons ? $"tv:{searchResult.Id}:all" : $"tv:{searchResult.Id}:s{seasonNumber}")
@@ -446,7 +597,15 @@ public sealed class JellyseerrImportService
                     ? tvDetail.RawSeasons
                     : tvDetail.RawSeasons.Where(x => x.SeasonNumber == seasonNumber).ToList();
 
-                if (wanted.Count > 0 && wanted.All(x => !x.HasAired()))
+                if (wanted.Count == 0)
+                {
+                    Log($"[SKIP] '{title}' → TMDB {searchResult.Id} has no season {seasonNumber} "
+                      + $"(it lists {string.Join(", ", tvDetail.RawSeasons.Select(x => x.SeasonNumber))}); not requested.");
+                    skipped++;
+                    continue;
+                }
+
+                if (wanted.All(x => !x.HasAired()))
                 {
                     Log($"[SKIP] '{title}' → {(requestAllSeasons ? "no season" : $"season {seasonNumber}")} "
                       + "has aired yet; it will be requested once episodes exist.");
@@ -456,8 +615,23 @@ public sealed class JellyseerrImportService
             }
 
             string seasonDesc = requestAllSeasons ? "all seasons" : $"S{seasonNumber}";
+            var requestText = $"'{title}' (MAL {malId}) → TMDB {searchResult.Id} {seasonDesc} [{malStatus}] [{profile.Name}]";
 
-            Log($"[REQUEST] '{title}' (MAL {malId}) → TMDB {searchResult.Id} {seasonDesc} [{malStatus}] [{profile.Name}]");
+            if (!dryRun)
+            {
+                var retryAfter = GetRetryAfter(jellyfinUserId, importKey, out var lastReason);
+                if (retryAfter.HasValue)
+                {
+                    Log($"[SKIP] '{title}' {seasonDesc} → the last attempt failed ({lastReason ?? "unknown reason"}); "
+                      + $"next try after {retryAfter.Value.ToLocalTime():yyyy-MM-dd HH:mm}.");
+                    skipped++;
+                    continue;
+                }
+            }
+            else
+            {
+                Log($"[REQUEST] {requestText}");
+            }
 
             if (!dryRun)
             {
@@ -472,47 +646,59 @@ public sealed class JellyseerrImportService
                     explicitSeasons = aired.Count > 0 ? aired : tvDetail.Seasons;
                 }
 
-                // Explicit anime routing is only used as a FALLBACK when we could not resolve a
-                // Jellyseerr user ID (i.e. X-Api-User cannot be sent).
-                // When X-Api-User IS set, Jellyseerr evaluates the user's override rules
-                // server-side. Sending explicit serverId/profileId/rootFolder in the body
-                // would override those rules — which caused incorrect paths and quality profiles
-                // to be used instead of the configured override rules.
-                int?    explicitServerId   = null;
-                int?    explicitProfileId  = null;
-                string? explicitRootFolder = null;
-                List<int>? explicitTags    = null;
-                if (jellyseerrUserId is null
-                    && tvDetail.IsAnime
-                    && animeProfileId.HasValue
-                    && animeDirectory is not null)
+                // Jellyseerr skips its override rules for admin accounts, so apply them here
+                // and send the outcome explicitly.
+                int?       explicitProfileId  = null;
+                string?    explicitRootFolder = null;
+                List<int>? explicitTags       = null;
+                if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
                 {
-                    explicitServerId   = sonarrServerId;
-                    explicitProfileId  = animeProfileId;
-                    explicitRootFolder = animeDirectory;
-                    explicitTags       = animeTagIds is { Count: > 0 } ? animeTagIds : null;
-                    _logger.LogDebug(
-                        "Explicit anime routing for '{Title}': no Jellyseerr user resolved, using fallback profile.",
-                        title);
+                    var rule = MatchOverrideRule(overrideRules, sonarrServerId, tvDetail, jellyseerrUserId);
+                    if (rule is not null)
+                    {
+                        explicitProfileId  = rule.ProfileId;
+                        explicitRootFolder = string.IsNullOrWhiteSpace(rule.RootFolder) ? null : rule.RootFolder;
+                        explicitTags       = rule.TagIds.Count > 0 ? rule.TagIds : null;
+                        Log($"[ROUTE] '{title}' matches Jellyseerr override rule #{rule.Id} → "
+                          + $"{explicitRootFolder ?? "default folder"}, profile {explicitProfileId?.ToString() ?? "default"}.");
+                    }
                 }
 
-                var ok = await SubmitJellyseerrRequestAsync(
+                var (outcome, failReason) = await SubmitJellyseerrRequestAsync(
                     effectiveUrl, effectiveApiKey,
                     searchResult.Id, searchResult.MediaType ?? "tv",
                     seasonNumber, explicitSeasons, jellyseerrUserId,
-                    explicitServerId, explicitProfileId, explicitRootFolder, explicitTags,
+                    null, explicitProfileId, explicitRootFolder, explicitTags,
                     title, cancellationToken).ConfigureAwait(false);
 
-                if (ok)
+                switch (outcome)
                 {
-                    submitted++;
-                    // Update local cache so duplicate submissions within the same run are caught
-                    existingRequests.Add(importKey);
-                    MarkRecent(importKey);
-                    if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
-                        MarkRecent($"tv:{searchResult.Id}:all");
+                    case SubmitOutcome.Created:
+                        submitted++;
+                        Log($"[REQUEST] {requestText}");
+                        createdRequests.Add(requestText);
+                        ClearFailure(jellyfinUserId, importKey);
+                        // Update local cache so duplicate submissions within the same run are caught
+                        existingRequests.Add(importKey);
+                        MarkRecent(importKey);
+                        if (string.Equals(searchResult.MediaType, "tv", StringComparison.OrdinalIgnoreCase))
+                            MarkRecent($"tv:{searchResult.Id}:all");
+                        break;
+
+                    case SubmitOutcome.AlreadyExists:
+                        Log($"[SKIP] '{title}' {seasonDesc} is already requested or available in Jellyseerr.");
+                        skipped++;
+                        existingRequests.Add(importKey);
+                        MarkRecent(importKey);
+                        ClearFailure(jellyfinUserId, importKey);
+                        break;
+
+                    default:
+                        Log($"[ERROR] Failed to submit Jellyseerr request for '{title}': {failReason}");
+                        RecordFailure(jellyfinUserId, importKey, failReason);
+                        failed++;
+                        break;
                 }
-                else { Log($"[ERROR] Failed to submit Jellyseerr request for '{title}'."); failed++; }
             }
             else
             {
@@ -545,6 +731,7 @@ public sealed class JellyseerrImportService
             {
                 var errors = log
                     .Where(l => l.StartsWith("[ERROR]") && !l.Contains("Not authenticated"))
+                    .Where(l => IsNewProblem(jellyfinUserId, l))
                     .ToList();
                 if (errors.Count > 0)
                 {
@@ -557,9 +744,9 @@ public sealed class JellyseerrImportService
 
             if (userCfg.WebhookOnImportSummary && !dryRun && submitted > 0)
             {
-                var requests = log.Where(l => l.StartsWith("[REQUEST]")).ToList();
+                var requests = createdRequests;
                 var desc = $"**{submitted} request(s)** created in Jellyseerr:\n" +
-                           string.Join("\n", requests.Take(10).Select(l => $"• {l.Replace("[REQUEST] ", "")}"));
+                           string.Join("\n", requests.Take(10).Select(l => $"• {l}"));
                 if (requests.Count > 10) desc += $"\n_and {requests.Count - 10} more_";
 
                 // A summary identical to the one just sent means the same titles were
@@ -1056,7 +1243,9 @@ public sealed class JellyseerrImportService
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private async Task<bool> SubmitJellyseerrRequestAsync(
+    private enum SubmitOutcome { Created, AlreadyExists, Failed }
+
+    private async Task<(SubmitOutcome Outcome, string? Reason)> SubmitJellyseerrRequestAsync(
         string baseUrl, string apiKey,
         int tmdbId, string mediaType,
         int seasonNumber, List<int>? explicitSeasons,
@@ -1067,9 +1256,7 @@ public sealed class JellyseerrImportService
         try
         {
             using var http = CreateJellyseerrClient(baseUrl, apiKey);
-            // X-Api-User tells Jellyseerr to evaluate override rules in the context of
-            // this specific user, so per-genre/language root folder & quality profile
-            // overrides are applied instead of the server defaults.
+            // X-Api-User makes Jellyseerr create the request as this user.
             if (jellyseerrUserId is not null)
                 http.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-User", jellyseerrUserId);
 
@@ -1089,56 +1276,65 @@ public sealed class JellyseerrImportService
                 body.Seasons = explicitSeasons ?? [seasonNumber];
             }
 
-            // Use _jsonOmitNulls so that null routing fields (serverId, profileId, rootFolder, tags)
-            // are NOT included in the JSON body at all. Jellyseerr distinguishes between a missing
-            // field (→ use server default / evaluate override rules) and an explicit null value
-            // (→ route to "server null" → silent internal failure while still returning HTTP 2xx).
+            // Null routing fields are left out of the JSON entirely; an explicit null is
+            // not the same as "not set" for Jellyseerr.
             var resp = await http.PostAsJsonAsync("/api/v1/request", body, _jsonOmitNulls, ct)
                                  .ConfigureAwait(false);
 
             var responseBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var status = (int)resp.StatusCode;
+
+            // Jellyseerr answers 202 when every requested season is already requested or
+            // available, and 409 for a duplicate. Neither is a failure.
+            if (status is 202 or 409)
+            {
+                _logger.LogDebug("Jellyseerr says '{Title}' (TMDB {Id}) already exists (HTTP {Status}): {Body}",
+                    title, tmdbId, status, responseBody);
+                return (SubmitOutcome.AlreadyExists, null);
+            }
 
             if (resp.IsSuccessStatusCode)
             {
-                // Jellyseerr answers 2xx even when it quietly creates nothing — most often
-                // for a season TMDB does not have yet. A created request always comes back
-                // with an id, so that is what decides, not the status code. Reporting a
-                // request that does not exist is why the same titles used to be
-                // "submitted" on every single run.
+                // A created request always comes back with an id. Without one Jellyseerr
+                // dropped it again (typically because TMDB has no TVDB ID for the show).
                 var createdId = TryReadRequestId(responseBody);
                 if (createdId is null)
                 {
                     _logger.LogWarning(
                         "Jellyseerr accepted the request for '{Title}' (TMDB {Id}) but created nothing — response: {Body}",
-                        title, tmdbId, responseBody);
-                    return false;
+                        title, tmdbId, responseBody.Length > 500 ? responseBody[..500] : responseBody);
+                    return (SubmitOutcome.Failed, "Jellyseerr accepted it but did not keep the request");
                 }
 
                 _logger.LogInformation(
                     "Jellyseerr request {RequestId} created for '{Title}' (TMDB {Id}).",
                     createdId, title, tmdbId);
-                return true;
+                return (SubmitOutcome.Created, null);
             }
 
-            // Treat HTTP 400 as likely a duplicate request or validation error from Jellyseerr
-            if ((int)resp.StatusCode == 400)
-            {
-                _logger.LogDebug(
-                    "Jellyseerr returned HTTP 400 for '{Title}' (possible duplicate): {Body}",
-                    title, responseBody);
-                return false; // Treat as failed, but don't log as warning (expected for duplicates)
-            }
-
-            _logger.LogWarning(
-                "Jellyseerr request failed for '{Title}': HTTP {Status} – {Err}",
-                title, (int)resp.StatusCode, responseBody);
-            return false;
+            var reason = $"HTTP {status} {ReadErrorMessage(responseBody)}".Trim();
+            _logger.LogWarning("Jellyseerr request failed for '{Title}': {Reason}", title, reason);
+            return (SubmitOutcome.Failed, reason);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Exception submitting Jellyseerr request for '{Title}'", title);
-            return false;
+            return (SubmitOutcome.Failed, ex.Message);
         }
+    }
+
+    private static string ReadErrorMessage(string responseBody)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("message", out var m)
+                && m.ValueKind == JsonValueKind.String)
+                return m.GetString() ?? string.Empty;
+        }
+        catch (JsonException) { }
+        return string.Empty;
     }
 
     /// <summary>
@@ -1163,38 +1359,143 @@ public sealed class JellyseerrImportService
         }
     }
 
-    /// <summary>Returns all regular (non-special) season numbers for a TMDB TV show via Jellyseerr,
-    /// plus the TVDB ID (needed for Sonarr lookup) and the raw season list (with names for title matching).</summary>
-    private async Task<(List<int> Seasons, int? TvdbId, bool IsAnime, List<JellyseerrTvSeason> RawSeasons)> FetchTvDetailAsync(
+    /// <summary>What Jellyseerr knows about a TMDB TV show, as needed for dedup, routing and season checks.</summary>
+    /// <param name="Loaded">False when the lookup failed; every other field is then empty.</param>
+    private sealed record TvInfo(
+        bool Loaded,
+        List<int> Seasons,
+        int? TvdbId,
+        bool IsAnime,
+        List<JellyseerrTvSeason> RawSeasons,
+        string? OriginalLanguage,
+        HashSet<int> GenreIds,
+        HashSet<int> KeywordIds)
+    {
+        public static readonly TvInfo Failed = new(false, [], null, false, [], null, [], []);
+    }
+
+    /// <summary>Regular (non-special) seasons, TVDB ID, language, genres and keywords of a TMDB TV show via Jellyseerr.</summary>
+    private async Task<TvInfo> FetchTvDetailAsync(
         string baseUrl, string apiKey, int tmdbId, CancellationToken ct)
     {
         try
         {
             using var http = CreateJellyseerrClient(baseUrl, apiKey);
             var resp = await http.GetAsync($"/api/v1/tv/{tmdbId}", ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode) return ([], null, false, []);
+            if (!resp.IsSuccessStatusCode) return TvInfo.Failed;
 
             var show = await resp.Content.ReadFromJsonAsync<JellyseerrTvDetail>(
                            cancellationToken: ct).ConfigureAwait(false);
-            var rawSeasons = (show?.Seasons ?? [])
+            if (show is null) return TvInfo.Failed;
+
+            var rawSeasons = (show.Seasons ?? [])
                 .Where(s => s.SeasonNumber > 0)
                 .OrderBy(s => s.SeasonNumber)
                 .ToList();
-            var seasons = rawSeasons.Select(s => s.SeasonNumber).ToList();
+            var genreIds = (show.Genres ?? []).Select(g => g.Id).ToHashSet();
+            var isAnime = string.Equals(show.OriginalLanguage, "ja", StringComparison.OrdinalIgnoreCase)
+                       && genreIds.Contains(16);
 
-            // Detect anime: Japanese original language + Animation genre (TMDB genre ID 16).
-            // We do this ourselves because Jellyseerr's auto-detection can silently fall back
-            // to the default (Shows) profile for some titles.
-            var isAnime = string.Equals(show?.OriginalLanguage, "ja", StringComparison.OrdinalIgnoreCase)
-                       && (show?.Genres?.Any(g => g.Id == 16) ?? false);
-
-            return (seasons, show?.ExternalIds?.TvdbId, isAnime, rawSeasons);
+            return new TvInfo(
+                true,
+                rawSeasons.Select(s => s.SeasonNumber).ToList(),
+                show.ExternalIds?.TvdbId,
+                isAnime,
+                rawSeasons,
+                show.OriginalLanguage,
+                genreIds,
+                (show.Keywords ?? []).Select(k => k.Id).ToHashSet());
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to fetch TV detail for TMDB {Id}.", tmdbId);
-            return ([], null, false, []);
+            return TvInfo.Failed;
         }
+    }
+
+    // ── Override rules ─────────────────────────────────────────────────────
+
+    private const int AnimeKeywordId = 210024;
+
+    private sealed class OverrideRule
+    {
+        public int          Id             { get; init; }
+        public int?         SonarrServiceId { get; init; }
+        public HashSet<int> UserIds        { get; init; } = [];
+        public HashSet<int> GenreIds       { get; init; } = [];
+        public HashSet<string> Languages   { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<int> KeywordIds     { get; init; } = [];
+        public int?         ProfileId      { get; init; }
+        public string?      RootFolder     { get; init; }
+        public List<int>    TagIds         { get; init; } = [];
+    }
+
+    private async Task<List<OverrideRule>> FetchOverrideRulesAsync(
+        string baseUrl, string apiKey, CancellationToken ct)
+    {
+        try
+        {
+            using var http = CreateJellyseerrClient(baseUrl, apiKey);
+            var resp = await http.GetAsync("/api/v1/overrideRule", ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Could not fetch Jellyseerr override rules: HTTP {Status}", (int)resp.StatusCode);
+                return [];
+            }
+
+            var raw = await resp.Content.ReadFromJsonAsync<List<JellyseerrOverrideRule>>(cancellationToken: ct)
+                          .ConfigureAwait(false) ?? [];
+
+            static HashSet<int> Ints(string? csv) => (csv ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => int.TryParse(x, out var n) ? n : (int?)null)
+                .Where(n => n.HasValue).Select(n => n!.Value).ToHashSet();
+
+            return raw.Select(r => new OverrideRule
+            {
+                Id              = r.Id,
+                SonarrServiceId = r.SonarrServiceId,
+                UserIds         = Ints(r.Users),
+                GenreIds        = Ints(r.Genre),
+                Languages       = (r.Language ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                                    .ToHashSet(StringComparer.OrdinalIgnoreCase),
+                KeywordIds      = Ints(r.Keywords),
+                ProfileId       = r.ProfileId,
+                RootFolder      = r.RootFolder,
+                TagIds          = Ints(r.Tags).ToList(),
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not fetch Jellyseerr override rules.");
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Picks the override rule Jellyseerr itself would apply to a TV request, using the same
+    /// conditions (user, genre, language, keyword) and the same "most specific wins" order.
+    /// </summary>
+    private static OverrideRule? MatchOverrideRule(
+        IReadOnlyList<OverrideRule> rules, int? sonarrServerId, TvInfo tv, string? jellyseerrUserId)
+    {
+        var hasAnimeKeyword = tv.KeywordIds.Contains(AnimeKeywordId);
+        int.TryParse(jellyseerrUserId, out var userId);
+
+        return rules
+            .Where(r => r.SonarrServiceId.HasValue && r.SonarrServiceId == (sonarrServerId ?? 0))
+            // Jellyseerr routes anime-keyword shows to the Sonarr anime settings by itself and
+            // ignores rules that do not mention the anime keyword.
+            .Where(r => !hasAnimeKeyword || r.KeywordIds.Contains(AnimeKeywordId))
+            .Where(r => r.UserIds.Count == 0 || r.UserIds.Contains(userId))
+            .Where(r => r.GenreIds.Count == 0 || r.GenreIds.Overlaps(tv.GenreIds))
+            .Where(r => r.Languages.Count == 0
+                     || (tv.OriginalLanguage is not null && r.Languages.Contains(tv.OriginalLanguage)))
+            .Where(r => r.KeywordIds.Count == 0 || r.KeywordIds.Overlaps(tv.KeywordIds))
+            .OrderByDescending(r => (r.GenreIds.Count > 0 ? 1 : 0)
+                                  + (r.Languages.Count > 0 ? 1 : 0)
+                                  + (r.KeywordIds.Count > 0 ? 1 : 0))
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -1574,6 +1875,20 @@ public sealed class JellyseerrImportService
         [JsonPropertyName("externalIds")]      public JellyseerrExternalIds?     ExternalIds      { get; set; }
         [JsonPropertyName("originalLanguage")] public string?                    OriginalLanguage { get; set; }
         [JsonPropertyName("genres")]           public List<JellyseerrGenre>?     Genres           { get; set; }
+        [JsonPropertyName("keywords")]         public List<JellyseerrGenre>?     Keywords         { get; set; }
+    }
+
+    private sealed class JellyseerrOverrideRule
+    {
+        [JsonPropertyName("id")]              public int     Id              { get; set; }
+        [JsonPropertyName("sonarrServiceId")] public int?    SonarrServiceId { get; set; }
+        [JsonPropertyName("users")]           public string? Users           { get; set; }
+        [JsonPropertyName("genre")]           public string? Genre           { get; set; }
+        [JsonPropertyName("language")]        public string? Language        { get; set; }
+        [JsonPropertyName("keywords")]        public string? Keywords        { get; set; }
+        [JsonPropertyName("profileId")]       public int?    ProfileId       { get; set; }
+        [JsonPropertyName("rootFolder")]      public string? RootFolder      { get; set; }
+        [JsonPropertyName("tags")]            public string? Tags            { get; set; }
     }
 
     private sealed class JellyseerrGenre
